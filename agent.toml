@@ -8,6 +8,15 @@
 
 default_model = "replay"
 
+# SKILL.md packages, loaded with progressive disclosure (see
+# agent/skills/registry.py): the agent's system prompt gets the index
+# (name/description/when_to_use) of every skill below this directory; the
+# full body loads only when the model "calls" that skill by name.
+#
+# NOTE: top-level keys like this one must come before any `[table]` header --
+# TOML attaches trailing key/value pairs to the most recently opened table.
+skills_dir = "skills"
+
 # Deterministic replay model + the echo-clock MCP server, with echo/clock
 # allowed. Used by tests and `make eval`.
 [models.replay]
@@ -72,9 +81,3 @@ tool = "count_words"
 [otel]
 enabled = false
 service_name = "agent-runtime"
-
-# SKILL.md packages, loaded with progressive disclosure (see
-# agent/skills/registry.py): the agent's system prompt gets the index
-# (name/description/when_to_use) of every skill below this directory; the
-# full body loads only when the model "calls" that skill by name.
-skills_dir = "skills"

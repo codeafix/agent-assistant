@@ -305,6 +305,7 @@ async def _execute_tool_calls(
         tool_start = time.monotonic()
         try:
             result = await tools.call_tool(server, block.name, block.input)
+            result.tool_use_id = block.id
         except Exception as exc:  # noqa: BLE001 - surfaced to the model as a tool error
             result = ToolResultBlock(tool_use_id=block.id, content=str(exc), is_error=True)
         tool_latency_ms = (time.monotonic() - tool_start) * 1000

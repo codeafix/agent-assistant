@@ -5,7 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from agent.core.events import TranscriptEvent
-from agent.core.messages import Message
+from agent.core.messages import Message, TextBlock
 from agent.models.base import Usage
 
 
@@ -26,3 +26,11 @@ class RunResult(BaseModel):
     stop_reason: str
     usage: Usage
     transcript: list[TranscriptEvent] = Field(default_factory=list[TranscriptEvent])
+
+    def final_text(self) -> str:
+        """Concatenate the text blocks of `final_message`, if any."""
+        if self.final_message is None:
+            return ""
+        return "".join(
+            block.text for block in self.final_message.content if isinstance(block, TextBlock)
+        )

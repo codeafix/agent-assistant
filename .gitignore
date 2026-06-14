@@ -11,3 +11,6 @@ wheels/
 
 # Local Claude Code settings
 .claude/settings.local.json
+
+# Inspect AI eval logs
+logs/

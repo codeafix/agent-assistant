@@ -1,0 +1,18 @@
+{
+  "turns": [
+    [
+      {"type": "text_delta", "text": "I'll echo that back to you."},
+      {
+        "type": "tool_call_complete",
+        "block": {"type": "tool_use", "id": "call_1", "name": "echo", "input": {"text": "hello"}}
+      },
+      {"type": "usage", "usage": {"input_tokens": 100, "output_tokens": 20}},
+      {"type": "done", "stop_reason": "tool_use"}
+    ],
+    [
+      {"type": "text_delta", "text": "The echo tool returned: hello"},
+      {"type": "usage", "usage": {"input_tokens": 130, "output_tokens": 10}},
+      {"type": "done", "stop_reason": "end_turn"}
+    ]
+  ]
+}

@@ -1,0 +1,27 @@
+# Default config for the Phase 1 vertical slice: a deterministic replay
+# model + the echo-clock MCP server, with echo/clock allowed.
+#
+# Override via env vars, e.g. AGENT_OTEL__ENABLED=true (see agent/config.py).
+
+[model]
+provider = "replay"
+name = "replay"
+cassette_path = "tests/cassettes/echo_clock.json"
+
+[[mcp_servers]]
+name = "echo-clock"
+transport = "stdio"
+command = "python"
+args = ["-m", "mcp_servers.echo_clock.server"]
+
+[[permissions]]
+server = "echo-clock"
+tool = "echo"
+
+[[permissions]]
+server = "echo-clock"
+tool = "clock"
+
+[otel]
+enabled = false
+service_name = "agent-runtime"

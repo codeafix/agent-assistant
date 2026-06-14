@@ -15,7 +15,7 @@ from agent.models.anthropic import AnthropicModel
 from agent.models.openai_compat import OpenAICompatModel
 from agent.models.prompted_tools import PromptedToolsModel
 from agent.models.replay import ReplayModel
-from agent.skills.registry import EmptySkillRegistry
+from agent.skills.registry import EmptySkillRegistry, FileSystemSkillRegistry
 
 
 def build_model(config: ModelConfig) -> Model:
@@ -56,5 +56,6 @@ def build_permissions(settings: AgentSettings) -> PermissionPolicy:
 
 
 def build_skills(settings: AgentSettings) -> SkillRegistry:
-    # Phase 3 will load `SKILL.md` packages from `settings.skills_dir`.
-    return EmptySkillRegistry()
+    if settings.skills_dir is None:
+        return EmptySkillRegistry()
+    return FileSystemSkillRegistry(settings.skills_dir)

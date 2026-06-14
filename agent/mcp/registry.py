@@ -35,7 +35,10 @@ class MCPToolRegistry:
                 self._tool_to_server[tool.name] = connection.name
 
     async def close(self) -> None:
-        for connection in self._connections.values():
+        # Reverse of connect() order: each connection's stdio transport opens
+        # an anyio cancel scope nested inside the previous one, so they must
+        # be exited LIFO or anyio raises on the outer scope.
+        for connection in reversed(list(self._connections.values())):
             await connection.close()
 
     async def __aenter__(self) -> MCPToolRegistry:

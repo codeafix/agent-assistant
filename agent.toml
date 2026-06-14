@@ -49,6 +49,14 @@ transport = "stdio"
 command = "python"
 args = ["-m", "mcp_servers.echo_clock.server"]
 
+# A second MCP server, added by config alone (agent/core is untouched) --
+# see agent/mcp/registry.py.
+[[mcp_servers]]
+name = "wordcount"
+transport = "stdio"
+command = "python"
+args = ["-m", "mcp_servers.wordcount.server"]
+
 [[permissions]]
 server = "echo-clock"
 tool = "echo"
@@ -57,6 +65,16 @@ tool = "echo"
 server = "echo-clock"
 tool = "clock"
 
+[[permissions]]
+server = "wordcount"
+tool = "count_words"
+
 [otel]
 enabled = false
 service_name = "agent-runtime"
+
+# SKILL.md packages, loaded with progressive disclosure (see
+# agent/skills/registry.py): the agent's system prompt gets the index
+# (name/description/when_to_use) of every skill below this directory; the
+# full body loads only when the model "calls" that skill by name.
+skills_dir = "skills"

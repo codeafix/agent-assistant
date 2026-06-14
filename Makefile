@@ -15,8 +15,9 @@ help:
 	@echo "  format-check   ruff format --check"
 	@echo "  typecheck      pyright"
 	@echo "  test           pytest"
+	@echo "  coverage       pytest with coverage report (fails under threshold)"
 	@echo "  eval           run the Inspect AI echo-clock eval"
-	@echo "  check          lint + format-check + typecheck + test (CI gate)"
+	@echo "  check          lint + format-check + typecheck + coverage (CI gate)"
 	@echo "  run            run the agent CLI once (PROMPT=\"...\")"
 	@echo "  compose-build  build the agent image for deploy/compose.yaml"
 	@echo "  compose-up     start the agent + Langfuse stack"
@@ -48,12 +49,16 @@ typecheck:
 test:
 	uv run pytest -q
 
+.PHONY: coverage
+coverage:
+	uv run pytest -q --cov=agent --cov-report=term-missing
+
 .PHONY: eval
 eval:
 	uv run python -m inspect_ai eval evals/tasks/echo_clock.py
 
 .PHONY: check
-check: lint format-check typecheck test
+check: lint format-check typecheck coverage
 
 .PHONY: run
 run:
@@ -78,4 +83,4 @@ compose-logs:
 .PHONY: clean
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
-	rm -rf .pytest_cache .ruff_cache logs
+	rm -rf .pytest_cache .ruff_cache .coverage htmlcov logs

@@ -14,3 +14,7 @@ wheels/
 
 # Inspect AI eval logs
 logs/
+
+# Coverage
+.coverage
+htmlcov/

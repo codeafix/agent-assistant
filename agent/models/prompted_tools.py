@@ -90,6 +90,7 @@ class PromptedToolsModel:
         if remaining_text:
             yield TextDelta(text=remaining_text)
 
+        tool_calls_emitted = 0
         for match in matches:
             try:
                 call: dict[str, object] = json.loads(match.group(1).strip())
@@ -102,10 +103,11 @@ class PromptedToolsModel:
                 )
             except (json.JSONDecodeError, KeyError, TypeError):
                 continue
+            tool_calls_emitted += 1
             yield ToolCallComplete(
                 block=ToolUseBlock(id=f"call_{uuid.uuid4().hex[:8]}", name=name, input=arguments)
             )
 
-        if matches:
+        if tool_calls_emitted:
             stop_reason = "tool_use"
         yield StreamDone(stop_reason=stop_reason)

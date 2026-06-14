@@ -20,6 +20,7 @@ dev = [
     "pyright>=1.1.380",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=7.1.0",
     "ruff>=0.7",
 ]
 
@@ -39,3 +40,17 @@ reportMissingTypeStubs = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["agent"]
+omit = [
+    # Composition-root/CLI wiring -- exercised by `make run`/`make compose-up`,
+    # not unit tests.
+    "agent/__main__.py",
+    "agent/composition.py",
+    "agent/observability/otel.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 90

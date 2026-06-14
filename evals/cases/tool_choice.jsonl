@@ -1,0 +1,1 @@
+{"name": "echo_basic", "input": "Please echo 'hello'.", "cassette": "echo_clock.json", "system_prompt": "You are a helpful agent with access to an echo tool.", "expected_tool_calls": [{"server": "echo-clock", "tool": "echo", "args": {"text": "hello"}}], "response_includes": "hello"}

@@ -92,6 +92,12 @@ class PermissionDecided(EventBase):
     reason: str
 
 
+class SkillInvoked(EventBase):
+    type: Literal["skill_invoked"] = "skill_invoked"
+    tool_use_id: str
+    skill: str
+
+
 class ToolCallStarted(EventBase):
     type: Literal["tool_call_started"] = "tool_call_started"
     tool_use_id: str
@@ -123,6 +129,7 @@ TranscriptEvent = Annotated[
     | ModelTextDelta
     | ToolCallRequested
     | PermissionDecided
+    | SkillInvoked
     | ToolCallStarted
     | ToolCallFinished
     | Error,

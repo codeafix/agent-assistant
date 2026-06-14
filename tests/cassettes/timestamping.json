@@ -1,0 +1,21 @@
+{
+  "turns": [
+    [
+      {"type": "text_delta", "text": "Let me check the timestamping instructions."},
+      {"type": "tool_call_complete", "block": {"type": "tool_use", "id": "call_1", "name": "timestamping", "input": {}}},
+      {"type": "usage", "usage": {"input_tokens": 80, "output_tokens": 15}},
+      {"type": "done", "stop_reason": "tool_use"}
+    ],
+    [
+      {"type": "text_delta", "text": "Now I'll get the current time."},
+      {"type": "tool_call_complete", "block": {"type": "tool_use", "id": "call_2", "name": "clock", "input": {}}},
+      {"type": "usage", "usage": {"input_tokens": 150, "output_tokens": 15}},
+      {"type": "done", "stop_reason": "tool_use"}
+    ],
+    [
+      {"type": "text_delta", "text": "It's currently 2026-01-01 00:00 UTC."},
+      {"type": "usage", "usage": {"input_tokens": 180, "output_tokens": 12}},
+      {"type": "done", "stop_reason": "end_turn"}
+    ]
+  ]
+}

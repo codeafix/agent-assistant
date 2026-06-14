@@ -18,6 +18,7 @@ from agent.core.events import (
     ModelCallStarted,
     ModelTextDelta,
     PermissionDecided,
+    SkillInvoked,
     StepFinished,
     StepStarted,
     ToolCallFinished,
@@ -225,6 +226,14 @@ async def _execute_tool_calls(
     for block in tool_use_blocks[:MAX_TOOL_CALLS_PER_STEP]:
         skill = skills.get_skill(block.name)
         if skill is not None:
+            await sink.emit(
+                SkillInvoked(
+                    run_id=run_id,
+                    step_index=step_index,
+                    tool_use_id=block.id,
+                    skill=skill.name,
+                )
+            )
             results.append(ToolResultBlock(tool_use_id=block.id, content=skill.load_body()))
             continue
 

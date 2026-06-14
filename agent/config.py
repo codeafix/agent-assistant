@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -16,6 +16,8 @@ from pydantic_settings import (
 )
 
 from agent.mcp.permissions import AllowRule
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 class ModelConfig(BaseModel):
@@ -65,7 +67,7 @@ class AgentSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",
         env_nested_delimiter="__",
-        toml_file="agent.toml",
+        toml_file=_REPO_ROOT / "agent.toml",
     )
 
     models: dict[str, ModelConfig]
@@ -75,6 +77,15 @@ class AgentSettings(BaseSettings):
     otel: OtelConfig = Field(default_factory=OtelConfig)
     skills_dir: Path | None = None
     max_steps: int = 20
+
+    @field_validator("skills_dir")
+    @classmethod
+    def _resolve_skills_dir(cls, value: Path | None) -> Path | None:
+        """Resolve relative to the repo root, not the process cwd -- e.g.
+        `inspect_ai` chdirs into `evals/tasks/` while loading eval tasks."""
+        if value is None or value.is_absolute():
+            return value
+        return _REPO_ROOT / value
 
     def resolve_model(self, name: str | None = None) -> ModelConfig:
         """Look up a model by registry key, falling back to `default_model`."""

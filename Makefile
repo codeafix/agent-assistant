@@ -15,6 +15,11 @@ LLAMA_PORT ?= 8080
 MODEL ?=
 MODEL_FLAG = $(if $(MODEL),--model $(MODEL),)
 
+# Eval suite assistant: "replay" (default) deterministically replays each
+# case's cassette; any other agent.toml [models] key (e.g. granite-local)
+# runs the same ground truth against that real model.
+EVAL_MODEL ?= replay
+
 .PHONY: help
 help:
 	@echo "Targets:"
@@ -25,7 +30,7 @@ help:
 	@echo "  typecheck      pyright"
 	@echo "  test           pytest"
 	@echo "  coverage       pytest with coverage report (fails under threshold)"
-	@echo "  eval           run the Inspect AI eval suite (evals/tasks/)"
+	@echo "  eval           run the Inspect AI eval suite (evals/tasks/, EVAL_MODEL=<registry key>)"
 	@echo "  check          lint + format-check + typecheck + coverage (CI gate)"
 	@echo "  run            run the agent CLI once (PROMPT=\"...\", MODEL=<registry key>)"
 	@echo "  run-local      run the agent CLI once against llama-server (PROMPT=\"...\")"
@@ -69,7 +74,7 @@ coverage:
 
 .PHONY: eval
 eval:
-	uv run python -m inspect_ai eval evals/tasks/
+	uv run python -m inspect_ai eval evals/tasks/ -T model=$(EVAL_MODEL)
 
 .PHONY: check
 check: lint format-check typecheck coverage

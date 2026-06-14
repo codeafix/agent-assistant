@@ -19,6 +19,7 @@ from inspect_ai.dataset import Sample, json_dataset
 from evals.bridge import run_eval_case
 from evals.scorers import (
     denied_tools_not_executed,
+    overall,
     response_includes,
     skills_used,
     stop_reason_matches,
@@ -53,6 +54,7 @@ def case_task(filename: str, model: str = "replay") -> Task:
         dataset=json_dataset(str(CASES_DIR / filename), sample_fields=_record_to_sample),
         solver=run_eval_case(model),
         scorer=[
+            overall(),
             response_includes(),
             stop_reason_matches(),
             tool_calls_match(),

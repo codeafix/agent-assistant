@@ -11,7 +11,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from inspect_ai.scorer import CORRECT, INCORRECT, Score, Scorer, Target, accuracy, scorer, stderr
+from inspect_ai.scorer import (
+    CORRECT,
+    INCORRECT,
+    Score,
+    Scorer,
+    Target,
+    accuracy,
+    at_least,
+    multi_scorer,
+    scorer,
+    stderr,
+)
 from inspect_ai.solver import TaskState
 
 from evals.spec import EvalCase
@@ -169,3 +180,24 @@ def denied_tools_not_executed() -> Scorer:
         return Score(value=CORRECT, explanation="all denied_tools were denied and never executed")
 
     return score
+
+
+@scorer(metrics=[accuracy(), stderr()])
+def overall() -> Scorer:
+    """Single pass/fail judgment per sample: CORRECT iff every one of the
+    other scorers is CORRECT for this case (each is trivially CORRECT for
+    expectations the case doesn't set, so a case that sets nothing passes
+    trivially -- as intended).
+
+    `accuracy` on this scorer is the fraction of samples that fully meet
+    every expectation they set, i.e. the suite's overall score -- the
+    per-dimension scorers above remain for diagnosing *which* expectation
+    failed."""
+    checks = [
+        response_includes(),
+        stop_reason_matches(),
+        tool_calls_match(),
+        skills_used(),
+        denied_tools_not_executed(),
+    ]
+    return multi_scorer(checks, at_least(len(checks)))

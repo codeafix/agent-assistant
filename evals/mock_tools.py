@@ -18,7 +18,7 @@ class MockToolRegistry:
         self._mocks = {(m.server, m.tool): m for m in mocks}
         self._tool_to_server = {m.tool: m.server for m in mocks}
         self._tool_specs = [
-            ToolSpec(name=m.tool, description="", input_schema={"type": "object", "properties": {}})
+            ToolSpec(name=m.tool, description=m.description, input_schema=m.input_schema)
             for m in mocks
         ]
 

@@ -25,12 +25,22 @@ class ExpectedToolCall(BaseModel):
 
 
 class MockToolResult(BaseModel):
-    """A canned tool result, used in place of a real MCP server call."""
+    """A canned tool result, used in place of a real MCP server call.
+
+    `description`/`input_schema` are advertised to the model exactly like a
+    real MCP tool's (see `agent.core.messages.ToolSpec`) -- get these right,
+    or a model that takes tool schemas literally (e.g. one whose
+    function-calling grammar is constrained by `input_schema`) may omit
+    arguments the eval's `expected_tool_calls`/scorers expect."""
 
     server: str
     tool: str
     content: str
     is_error: bool = False
+    description: str = ""
+    input_schema: dict[str, object] = Field(
+        default_factory=lambda: {"type": "object", "properties": {}}
+    )
 
 
 class EvalCase(BaseModel):

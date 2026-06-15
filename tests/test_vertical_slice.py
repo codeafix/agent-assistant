@@ -8,6 +8,7 @@ from agent.config import MCPServerConfig
 from agent.core.entrypoint import run_agent
 from agent.core.events import (
     Decision,
+    Error,
     PermissionDecided,
     ToolCallFinished,
     ToolCallRequested,
@@ -117,3 +118,36 @@ async def test_denied_tool_call_never_executes() -> None:
     # The denial is surfaced to the model as a tool error, which the
     # cassette's second turn echoes back -- proving the run continues safely.
     assert result.stop_reason == "end_turn"
+
+
+async def test_repeated_identical_tool_call_triggers_loop_detection() -> None:
+    cassette = Path(__file__).parent / "cassettes" / "loop_detection.json"
+    model = ReplayModel(cassette)
+    permissions = AllowlistPolicy([AllowRule(server="echo-clock", tool="echo")])
+    sink = InMemorySink()
+    task = Task(
+        id="echo-loop",
+        system_prompt="You are a helpful agent with access to an echo tool.",
+        messages=[Message(role="user", content=[TextBlock(text="Please echo 'loop' repeatedly.")])],
+    )
+
+    async with MCPToolRegistry([ECHO_CLOCK_SERVER]) as tools:
+        result = await run_agent(
+            task,
+            model=model,
+            tools=tools,
+            skills=EmptySkillRegistry(),
+            permissions=permissions,
+            sink=sink,
+        )
+
+    assert result.stop_reason == "loop_detected"
+
+    # The first three identical calls execute; the fourth is caught by the
+    # guard rail and never reaches the MCP server.
+    finished = [e for e in sink.events if isinstance(e, ToolCallFinished)]
+    assert len(finished) == 3
+
+    errors = [e for e in sink.events if isinstance(e, Error)]
+    assert len(errors) == 1
+    assert errors[0].where == "loop_detection"

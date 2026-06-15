@@ -54,5 +54,6 @@ class EvalCase(BaseModel):
     expected_tool_calls: list[ExpectedToolCall] = Field(default_factory=list[ExpectedToolCall])
     expected_skills: list[str] = Field(default_factory=list[str])
     denied_tools: list[ExpectedToolCall] = Field(default_factory=list[ExpectedToolCall])
+    unexpected_tool_calls: list[ExpectedToolCall] = Field(default_factory=list[ExpectedToolCall])
     expected_stop_reason: str | None = None
     response_includes: str | None = None

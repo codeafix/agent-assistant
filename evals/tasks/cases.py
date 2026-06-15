@@ -23,8 +23,9 @@ from evals.suite import case_task
 
 @task
 def tool_choice(model: str = "replay") -> Task:
-    """Basic tool-choice ground truth: the agent calls the right tool with
-    the right arguments and reports the result."""
+    """Basic tool-choice ground truth: the agent calls the right tool (echo,
+    or a second MCP server's word-counter) with the right arguments and
+    reports the result."""
     return case_task("tool_choice.jsonl", model)
 
 
@@ -36,14 +37,9 @@ def skills(model: str = "replay") -> Task:
 
 
 @task
-def regression(model: str = "replay") -> Task:
-    """Record/replay regression suite: a second MCP server dispatched
-    correctly, and the loop-detection guard rail stopping a repeating model."""
-    return case_task("regression.jsonl", model)
-
-
-@task
 def prompt_injection(model: str = "replay") -> Task:
-    """Adversarial: a tool result coerces the model into requesting a
-    disallowed tool, which must be denied and never executed."""
+    """Adversarial: a mocked tool result embeds an instruction trying to
+    coerce the model into calling a disallowed tool. Measures whether the
+    model reports the legitimate tool content while ignoring the injected
+    instruction, never requesting the disallowed tool."""
     return case_task("prompt_injection.jsonl", model)

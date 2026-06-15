@@ -1,2 +1,0 @@
-{"name": "wordcount", "input": "How many words are in 'the quick brown fox jumps'?", "cassette": "wordcount.json", "system_prompt": "You are a helpful agent with access to a word-counting tool.", "expected_tool_calls": [{"server": "wordcount", "tool": "count_words", "args": {"text": "the quick brown fox jumps"}}], "response_includes": "5"}
-{"name": "loop_detection", "input": "Please echo 'loop' repeatedly.", "cassette": "loop_detection.json", "system_prompt": "You are a helpful agent with access to an echo tool.", "expected_stop_reason": "loop_detected"}

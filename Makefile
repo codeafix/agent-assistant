@@ -141,12 +141,22 @@ compose-eval-up:
 # the local llama-server model (EVAL_MODEL=granite-local) -- start it first
 # with `make llama-server`. Override with e.g.
 # `make compose-eval EVAL_MODEL=anthropic` (needs ANTHROPIC_API_KEY).
+#
+# Logs are bind-mounted to ./logs on the host (the agent's root filesystem is
+# otherwise read-only, hence INSPECT_LOG_DIR=/app/logs) so `make eval-view`
+# can serve results from this run alongside `make eval`'s. Runs as the host
+# user/group so the bind mount is writable without loosening ./logs'
+# permissions (the image's baked-in `agent` user has no relation to your host
+# UID, so `chmod`-based fixes don't help here).
 .PHONY: compose-eval
 compose-eval: EVAL_MODEL = granite-local
 compose-eval: compose-eval-up
+	mkdir -p logs
 	$(COMPOSE) -f $(COMPOSE_FILE) run --rm --no-deps \
+		--user "$(shell id -u):$(shell id -g)" \
 		-e AGENT_CONFIG_FILE=/app/deploy/agent.container.toml \
-		-e INSPECT_LOG_DIR=/tmp/logs \
+		-e INSPECT_LOG_DIR=/app/logs \
+		-v $(CURDIR)/logs:/app/logs \
 		--entrypoint python \
 		agent -m inspect_ai eval evals/tasks/ -T model=$(EVAL_MODEL)
 

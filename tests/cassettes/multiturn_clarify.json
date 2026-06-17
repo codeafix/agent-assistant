@@ -1,0 +1,9 @@
+{
+  "turns": [
+    [
+      {"type": "text_delta", "text": "Which timezone?"},
+      {"type": "usage", "usage": {"input_tokens": 40, "output_tokens": 5}},
+      {"type": "done", "stop_reason": "end_turn"}
+    ]
+  ]
+}

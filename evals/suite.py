@@ -25,6 +25,11 @@ from evals.scorers import (
     skills_used,
     stop_reason_matches,
     tool_calls_match,
+    turn_denied_tools_not_executed,
+    turn_no_unexpected_tool_calls,
+    turn_responses_include,
+    turn_stop_reasons_match,
+    turn_tool_calls_match,
 )
 from evals.spec import EvalCase
 
@@ -33,9 +38,13 @@ CASES_DIR = Path(__file__).parent / "cases"
 
 def _record_to_sample(record: dict[str, Any]) -> Sample:
     case = EvalCase.model_validate(record)
+    display_input = case.input if not case.turns else case.turns[0].user_message
+    display_target = (
+        case.response_includes if not case.turns else (case.turns[-1].response_includes or "")
+    ) or ""
     return Sample(
-        input=case.input,
-        target=case.response_includes or "",
+        input=display_input,
+        target=display_target,
         id=case.name,
         metadata=case.model_dump(mode="json"),
     )
@@ -62,5 +71,10 @@ def case_task(filename: str, model: str = "replay") -> Task:
             skills_used(),
             denied_tools_not_executed(),
             no_unexpected_tool_calls(),
+            turn_tool_calls_match(),
+            turn_stop_reasons_match(),
+            turn_responses_include(),
+            turn_denied_tools_not_executed(),
+            turn_no_unexpected_tool_calls(),
         ],
     )

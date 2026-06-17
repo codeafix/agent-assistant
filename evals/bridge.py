@@ -16,9 +16,10 @@ the same way `python -m agent --model <key>` does.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
-from inspect_ai.model import ChatMessageAssistant, ModelOutput
+from inspect_ai.model import ChatMessageAssistant, ChatMessageUser, ModelOutput
 from inspect_ai.solver import Generate, Solver, TaskState, solver
 
 from agent.composition import build_model, build_permissions, build_skills
@@ -44,6 +45,10 @@ def run_eval_case(model: str = "replay") -> Solver:
     `state.store`) so `evals.scorers` can grade both the response and how the
     agent got there.
 
+    For multi-turn cases (`EvalCase.turns`), runs one `run_agent` call per
+    turn with accumulated message history, storing per-turn transcripts,
+    stop reasons, and final texts under `turn_*` keys in `state.store`.
+
     `model` is `"replay"` (default) for deterministic cassette playback, or
     a `agent.toml` `[models]` registry key to run against a real model."""
 
@@ -56,33 +61,81 @@ def run_eval_case(model: str = "replay") -> Solver:
 
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         case = state.metadata_as(EvalCase)
-        active_model = real_model or ReplayModel(CASSETTES_DIR / case.cassette, name="replay")
-
+        sample_id = str(state.sample_id)
         permissions: PermissionPolicy = (
             AllowlistPolicy(case.permissions)
             if case.permissions is not None
             else default_permissions
         )
 
-        agent_task = Task(
-            id=str(state.sample_id),
-            system_prompt=case.system_prompt,
-            messages=[Message(role="user", content=[TextBlock(text=state.input_text)])],
-        )
+        async with contextlib.AsyncExitStack() as stack:
+            tools: ToolRegistry
+            if case.mock_tools:
+                tools = MockToolRegistry(case.mock_tools)
+            else:
+                tools = await stack.enter_async_context(MCPToolRegistry(settings.mcp_servers))
 
-        tools: ToolRegistry
-        if case.mock_tools:
-            tools = MockToolRegistry(case.mock_tools)
-            result = await run_agent(
-                agent_task,
-                model=active_model,
-                tools=tools,
-                skills=skills,
-                permissions=permissions,
-                sink=InMemorySink(),
-            )
-        else:
-            async with MCPToolRegistry(settings.mcp_servers) as tools:
+            if case.turns:
+                accumulated: list[Message] = []
+                turn_transcripts: list[list[dict[str, object]]] = []
+                turn_stop_reasons: list[str] = []
+                turn_final_texts: list[str] = []
+
+                for turn in case.turns:
+                    active_model = real_model or ReplayModel(
+                        CASSETTES_DIR / turn.cassette, name="replay"
+                    )
+                    accumulated.append(
+                        Message(role="user", content=[TextBlock(text=turn.user_message)])
+                    )
+                    agent_task = Task(
+                        id=sample_id,
+                        system_prompt=case.system_prompt,
+                        messages=list(accumulated),
+                    )
+                    turn_result = await run_agent(
+                        agent_task,
+                        model=active_model,
+                        tools=tools,
+                        skills=skills,
+                        permissions=permissions,
+                        sink=InMemorySink(),
+                    )
+                    turn_transcripts.append(
+                        [e.model_dump(mode="json") for e in turn_result.transcript]
+                    )
+                    turn_stop_reasons.append(turn_result.stop_reason)
+                    turn_final_texts.append(turn_result.final_text())
+                    accumulated = list(turn_result.messages)
+
+                final_text = turn_final_texts[-1] if turn_final_texts else ""
+                active_model_name = real_model.name if real_model else "replay"
+                state.output = ModelOutput.from_content(model=active_model_name, content=final_text)
+                # Populate the full conversation into state.messages so the
+                # eval-view shows every clarifying exchange, not just the final
+                # answer. The first user message is already in state.messages
+                # from the sample input (Inspect AI adds it on construction).
+                for i, (turn, text) in enumerate(zip(case.turns, turn_final_texts, strict=False)):
+                    if i > 0:
+                        state.messages.append(ChatMessageUser(content=turn.user_message))
+                    state.messages.append(ChatMessageAssistant(content=text))
+                state.store.set("turn_transcripts", turn_transcripts)
+                state.store.set("turn_stop_reasons", turn_stop_reasons)
+                state.store.set("turn_final_texts", turn_final_texts)
+                # Combined transcript lets skills_used and other aggregate scorers
+                # work across the whole conversation without changes.
+                state.store.set("transcript", [e for ts in turn_transcripts for e in ts])
+                state.store.set("stop_reason", turn_stop_reasons[-1] if turn_stop_reasons else "")
+
+            else:
+                active_model = real_model or ReplayModel(
+                    CASSETTES_DIR / case.cassette, name="replay"
+                )
+                agent_task = Task(
+                    id=sample_id,
+                    system_prompt=case.system_prompt,
+                    messages=[Message(role="user", content=[TextBlock(text=state.input_text)])],
+                )
                 result = await run_agent(
                     agent_task,
                     model=active_model,
@@ -91,12 +144,14 @@ def run_eval_case(model: str = "replay") -> Solver:
                     permissions=permissions,
                     sink=InMemorySink(),
                 )
+                final_text = result.final_text()
+                state.output = ModelOutput.from_content(model=active_model.name, content=final_text)
+                state.messages.append(ChatMessageAssistant(content=final_text))
+                state.store.set(
+                    "transcript", [e.model_dump(mode="json") for e in result.transcript]
+                )
+                state.store.set("stop_reason", result.stop_reason)
 
-        final_text = result.final_text()
-        state.output = ModelOutput.from_content(model=active_model.name, content=final_text)
-        state.messages.append(ChatMessageAssistant(content=final_text))
-        state.store.set("transcript", [e.model_dump(mode="json") for e in result.transcript])
-        state.store.set("stop_reason", result.stop_reason)
         return state
 
     return solve

@@ -26,6 +26,7 @@ class RunResult(BaseModel):
     stop_reason: str
     usage: Usage
     transcript: list[TranscriptEvent] = Field(default_factory=list[TranscriptEvent])
+    messages: list[Message] = Field(default_factory=list[Message])
 
     def final_text(self) -> str:
         """Concatenate the text blocks of `final_message`, if any."""

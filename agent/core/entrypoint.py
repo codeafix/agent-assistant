@@ -65,4 +65,5 @@ async def run_agent(
         stop_reason=stop_reason,
         usage=usage,
         transcript=recorder.events,
+        messages=messages,
     )

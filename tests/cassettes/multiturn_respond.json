@@ -1,0 +1,23 @@
+{
+  "turns": [
+    [
+      {"type": "text_delta", "text": "Let me check that."},
+      {
+        "type": "tool_call_complete",
+        "block": {
+          "type": "tool_use",
+          "id": "mt_call_1",
+          "name": "get_time",
+          "input": {"timezone": "America/Los_Angeles"}
+        }
+      },
+      {"type": "usage", "usage": {"input_tokens": 80, "output_tokens": 15}},
+      {"type": "done", "stop_reason": "tool_use"}
+    ],
+    [
+      {"type": "text_delta", "text": "The current time in Pacific Time is 2:30 PM PDT."},
+      {"type": "usage", "usage": {"input_tokens": 110, "output_tokens": 12}},
+      {"type": "done", "stop_reason": "end_turn"}
+    ]
+  ]
+}

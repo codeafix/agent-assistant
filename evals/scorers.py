@@ -220,6 +220,178 @@ def no_unexpected_tool_calls() -> Scorer:
 
 
 @scorer(metrics=[accuracy(), stderr()])
+def turn_tool_calls_match() -> Scorer:
+    """For each turn in `turns` (if set), pass iff its `expected_tool_calls`
+    match a prefix of that turn's transcript tool-call requests, in order."""
+
+    async def score(state: TaskState, target: Target) -> Score:
+        case = state.metadata_as(EvalCase)
+        if not case.turns:
+            return Score(value=CORRECT, explanation="no turns for this case")
+
+        turn_transcripts: list[list[TranscriptEventDict]] = state.store.get("turn_transcripts", [])
+        failures: list[str] = []
+        for i, (turn, transcript) in enumerate(zip(case.turns, turn_transcripts, strict=False)):
+            if not turn.expected_tool_calls:
+                continue
+            actual = _tool_call_requests(transcript)
+            if len(actual) < len(turn.expected_tool_calls):
+                failures.append(
+                    f"turn {i}: expected {len(turn.expected_tool_calls)} tool call(s),"
+                    f" saw {len(actual)}"
+                )
+                continue
+            for expected, call in zip(turn.expected_tool_calls, actual, strict=False):
+                if expected.server != call["server"] or expected.tool != call["tool"]:
+                    failures.append(
+                        f"turn {i}: expected {expected.server}.{expected.tool},"
+                        f" got {call['server']}.{call['tool']}"
+                    )
+                elif expected.args is not None:
+                    args = call["args"]
+                    if not all(args.get(k) == v for k, v in expected.args.items()):
+                        failures.append(
+                            f"turn {i}: {expected.server}.{expected.tool}: expected args"
+                            f" {expected.args} to be a subset of {args}"
+                        )
+
+        if failures:
+            return Score(value=INCORRECT, explanation="; ".join(failures))
+        return Score(value=CORRECT, explanation="all turn tool calls matched expectations")
+
+    return score
+
+
+@scorer(metrics=[accuracy(), stderr()])
+def turn_stop_reasons_match() -> Scorer:
+    """For each turn in `turns` (if set), pass iff its `expected_stop_reason`
+    (if set) equals that turn's actual stop reason."""
+
+    async def score(state: TaskState, target: Target) -> Score:
+        case = state.metadata_as(EvalCase)
+        if not case.turns:
+            return Score(value=CORRECT, explanation="no turns for this case")
+
+        turn_stop_reasons: list[str] = state.store.get("turn_stop_reasons", [])
+        failures: list[str] = []
+        for i, (turn, actual) in enumerate(zip(case.turns, turn_stop_reasons, strict=False)):
+            if turn.expected_stop_reason is None:
+                continue
+            if actual != turn.expected_stop_reason:
+                failures.append(
+                    f"turn {i}: stop_reason == {actual!r}, expected {turn.expected_stop_reason!r}"
+                )
+
+        if failures:
+            return Score(value=INCORRECT, explanation="; ".join(failures))
+        return Score(value=CORRECT, explanation="all turn stop reasons matched")
+
+    return score
+
+
+@scorer(metrics=[accuracy(), stderr()])
+def turn_responses_include() -> Scorer:
+    """For each turn in `turns` (if set), pass iff its `response_includes`
+    (if set) is a substring of that turn's final response."""
+
+    async def score(state: TaskState, target: Target) -> Score:
+        case = state.metadata_as(EvalCase)
+        if not case.turns:
+            return Score(value=CORRECT, explanation="no turns for this case")
+
+        turn_final_texts: list[str] = state.store.get("turn_final_texts", [])
+        failures: list[str] = []
+        for i, (turn, text) in enumerate(zip(case.turns, turn_final_texts, strict=False)):
+            if turn.response_includes is None:
+                continue
+            if turn.response_includes not in text:
+                failures.append(
+                    f"turn {i}: response does not include {turn.response_includes!r}: {text!r}"
+                )
+
+        if failures:
+            return Score(value=INCORRECT, explanation="; ".join(failures))
+        return Score(value=CORRECT, explanation="all turn responses matched expectations")
+
+    return score
+
+
+@scorer(metrics=[accuracy(), stderr()])
+def turn_denied_tools_not_executed() -> Scorer:
+    """For each turn in `turns` (if set), pass iff every tool in that turn's
+    `denied_tools` was never executed in that turn's transcript."""
+
+    async def score(state: TaskState, target: Target) -> Score:
+        case = state.metadata_as(EvalCase)
+        if not case.turns:
+            return Score(value=CORRECT, explanation="no turns for this case")
+
+        turn_transcripts: list[list[TranscriptEventDict]] = state.store.get("turn_transcripts", [])
+        failures: list[str] = []
+        for i, (turn, transcript) in enumerate(zip(case.turns, turn_transcripts, strict=False)):
+            for expected in turn.denied_tools:
+                requested = any(
+                    e["type"] == "tool_call_requested"
+                    and e["server"] == expected.server
+                    and e["tool"] == expected.tool
+                    for e in transcript
+                )
+                denied = any(
+                    e["type"] == "permission_decided"
+                    and e["server"] == expected.server
+                    and e["tool"] == expected.tool
+                    and e["decision"] == "deny"
+                    for e in transcript
+                )
+                executed = any(
+                    e["type"] == "tool_call_started"
+                    and e["server"] == expected.server
+                    and e["tool"] == expected.tool
+                    for e in transcript
+                )
+                if executed or (requested and not denied):
+                    failures.append(
+                        f"turn {i}: {expected.server}.{expected.tool}:"
+                        f" requested={requested}, denied={denied}, executed={executed}"
+                    )
+
+        if failures:
+            return Score(value=INCORRECT, explanation="; ".join(failures))
+        return Score(value=CORRECT, explanation="all turn denied_tools were never executed")
+
+    return score
+
+
+@scorer(metrics=[accuracy(), stderr()])
+def turn_no_unexpected_tool_calls() -> Scorer:
+    """For each turn in `turns` (if set), pass iff none of that turn's
+    `unexpected_tool_calls` were requested by the model in that turn."""
+
+    async def score(state: TaskState, target: Target) -> Score:
+        case = state.metadata_as(EvalCase)
+        if not case.turns:
+            return Score(value=CORRECT, explanation="no turns for this case")
+
+        turn_transcripts: list[list[TranscriptEventDict]] = state.store.get("turn_transcripts", [])
+        failures: list[str] = []
+        for i, (turn, transcript) in enumerate(zip(case.turns, turn_transcripts, strict=False)):
+            requested = [
+                f"{e['server']}.{e['tool']}"
+                for e in _tool_call_requests(transcript)
+                for expected in turn.unexpected_tool_calls
+                if e["server"] == expected.server and e["tool"] == expected.tool
+            ]
+            if requested:
+                failures.append(f"turn {i}: unexpectedly requested: {requested}")
+
+        if failures:
+            return Score(value=INCORRECT, explanation="; ".join(failures))
+        return Score(value=CORRECT, explanation="no unexpected turn tool calls requested")
+
+    return score
+
+
+@scorer(metrics=[accuracy(), stderr()])
 def overall() -> Scorer:
     """Single pass/fail judgment per sample: CORRECT iff every one of the
     other scorers is CORRECT for this case (each is trivially CORRECT for
@@ -237,5 +409,10 @@ def overall() -> Scorer:
         skills_used(),
         denied_tools_not_executed(),
         no_unexpected_tool_calls(),
+        turn_tool_calls_match(),
+        turn_stop_reasons_match(),
+        turn_responses_include(),
+        turn_denied_tools_not_executed(),
+        turn_no_unexpected_tool_calls(),
     ]
     return multi_scorer(checks, at_least(len(checks)))

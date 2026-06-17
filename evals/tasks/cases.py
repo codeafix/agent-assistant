@@ -43,3 +43,11 @@ def prompt_injection(model: str = "replay") -> Task:
     model reports the legitimate tool content while ignoring the injected
     instruction, never requesting the disallowed tool."""
     return case_task("prompt_injection.jsonl", model)
+
+
+@task
+def multiturn(model: str = "replay") -> Task:
+    """Multi-turn conversation ground truth: the agent handles an ambiguous
+    request by asking a clarifying question, then calls the right tool with
+    the user's answer and reports the result."""
+    return case_task("multiturn.jsonl", model)

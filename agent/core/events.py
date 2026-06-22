@@ -89,6 +89,7 @@ class PermissionDecided(EventBase):
     server: str
     tool: str
     decision: Decision
+    allowed: bool
     reason: str
 
 

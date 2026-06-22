@@ -30,6 +30,19 @@ native_tool_calling = true
 price_per_input_token_usd = 3e-6
 price_per_output_token_usd = 15e-6
 
+# Qwen local via llama-server
+[models.qwen36-27b-local]
+provider = "openai_compat"
+name = "Qwen_Qwen3.6-27B-Q6_K"
+base_url = "http://host.containers.internal:8080/v1"
+native_tool_calling = true
+
+[models.qwen36-35b-local]
+provider = "openai_compat"
+name = "Qwen_Qwen3.6-35B-A3B-Q5_K_M"
+base_url = "http://host.containers.internal:8080/v1"
+native_tool_calling = true
+
 # IBM Granite 4.0 H Tiny via a `llama-server` running on the host (see `make
 # llama-server`), reached through podman/Docker's host-gateway DNS name.
 [models.granite-local]

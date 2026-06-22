@@ -96,6 +96,15 @@ async def main(argv: list[str]) -> int:
     return 0
 
 
+async def _stdin_approval(server: str, tool: str, args: dict[str, object]) -> bool:
+    """Approval hook for `Decision.PROMPT`: reads y/n from stdin."""
+    import json as _json
+
+    prompt = f"[approval required] Allow {server}.{tool}({_json.dumps(args)})? [y/N] "
+    answer = await asyncio.to_thread(input, prompt)
+    return answer.strip().lower() in {"y", "yes"}
+
+
 async def run_chat(
     *,
     model: Model,
@@ -139,6 +148,7 @@ async def run_chat(
             permissions=permissions,
             sink=sink,
             system=system,
+            approval=_stdin_approval,
             max_steps=max_steps,
         )
         print()

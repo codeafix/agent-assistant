@@ -77,6 +77,7 @@ async def test_agent_loop_calls_allowed_mcp_tool_and_answers() -> None:
     decided = [e for e in sink.events if isinstance(e, PermissionDecided)]
     assert len(decided) == 1
     assert decided[0].decision == Decision.ALLOW
+    assert decided[0].allowed is True
 
     finished = [e for e in sink.events if isinstance(e, ToolCallFinished)]
     assert len(finished) == 1
@@ -111,6 +112,7 @@ async def test_denied_tool_call_never_executes() -> None:
     decided = [e for e in sink.events if isinstance(e, PermissionDecided)]
     assert len(decided) == 1
     assert decided[0].decision == Decision.DENY
+    assert decided[0].allowed is False
 
     # The MCP server was never actually invoked.
     assert not any(isinstance(e, ToolCallFinished) for e in sink.events)
@@ -118,6 +120,37 @@ async def test_denied_tool_call_never_executes() -> None:
     # The denial is surfaced to the model as a tool error, which the
     # cassette's second turn echoes back -- proving the run continues safely.
     assert result.stop_reason == "end_turn"
+
+
+async def test_deny_rule_overrides_allow_rule_for_same_tool() -> None:
+    """A DENY rule beats an ALLOW rule for the same tool regardless of order --
+    deny-priority semantics, same as AWS IAM / firewall models."""
+    model = ReplayModel(CASSETTE)
+    permissions = AllowlistPolicy([
+        AllowRule(server="echo-clock", tool="echo"),  # ALLOW first
+        AllowRule(server="echo-clock", tool="echo", decision=Decision.DENY),  # DENY second
+    ])
+    sink = InMemorySink()
+    task = Task(
+        id="echo-hello-deny-wins",
+        messages=[Message(role="user", content=[TextBlock(text="Please echo 'hello'.")])],
+    )
+
+    async with MCPToolRegistry([ECHO_CLOCK_SERVER]) as tools:
+        result = await run_agent(
+            task,
+            model=model,
+            tools=tools,
+            skills=EmptySkillRegistry(),
+            permissions=permissions,
+            sink=sink,
+        )
+
+    decided = [e for e in sink.events if isinstance(e, PermissionDecided)]
+    assert len(decided) == 1
+    assert decided[0].decision == Decision.DENY
+    assert decided[0].allowed is False
+    assert not any(isinstance(e, ToolCallFinished) for e in sink.events)
 
 
 async def test_repeated_identical_tool_call_triggers_loop_detection() -> None:

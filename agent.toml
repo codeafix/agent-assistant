@@ -24,6 +24,19 @@ provider = "replay"
 name = "replay"
 cassette_path = "tests/cassettes/echo_clock.json"
 
+# Qwen local via llama-server
+[models.qwen36-27b-local]
+provider = "openai_compat"
+name = "Qwen_Qwen3.6-27B"
+base_url = "http://localhost:8080/v1"
+native_tool_calling = true
+
+[models.qwen36-35b-local]
+provider = "openai_compat"
+name = "Qwen_Qwen3.6-35B-A3B"
+base_url = "http://localhost:8080/v1"
+native_tool_calling = true
+
 # Anthropic API. Requires ANTHROPIC_API_KEY in the environment.
 [models.anthropic]
 provider = "anthropic"

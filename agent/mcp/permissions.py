@@ -33,13 +33,22 @@ class AllowRule(BaseModel):
 
 class AllowlistPolicy:
     """Default-deny: a tool call is allowed/prompted only if an `AllowRule`
-    matches; everything else is denied."""
+    matches; everything else is denied.
+
+    When multiple rules match the same (server, tool, args), deny-priority
+    ordering applies: DENY beats PROMPT beats ALLOW. This matches AWS IAM /
+    firewall semantics — an explicit deny overrides any allow regardless of
+    the order rules appear in the config."""
 
     def __init__(self, rules: list[AllowRule] | None = None) -> None:
         self._rules = rules or []
 
     def evaluate(self, server: str, tool: str, args: dict[str, object]) -> Decision:
-        for rule in self._rules:
-            if rule.matches(server, tool, args):
-                return rule.decision
+        matching = [r.decision for r in self._rules if r.matches(server, tool, args)]
+        if Decision.DENY in matching:
+            return Decision.DENY
+        if Decision.PROMPT in matching:
+            return Decision.PROMPT
+        if Decision.ALLOW in matching:
+            return Decision.ALLOW
         return Decision.DENY

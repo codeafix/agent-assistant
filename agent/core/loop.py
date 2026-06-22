@@ -292,6 +292,7 @@ async def _execute_tool_calls(
                 server=server,
                 tool=block.name,
                 decision=decision,
+                allowed=allowed,
                 reason=reason,
             )
         )

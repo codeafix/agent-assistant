@@ -83,6 +83,9 @@ class StreamingConsoleSink:
             print(event.text, end="", flush=True)
         elif isinstance(event, ToolCallRequested):
             print(f"\n[tool call: {event.tool}({json.dumps(event.args)})]", flush=True)
+        elif isinstance(event, PermissionDecided):
+            if not event.allowed:
+                print(f"[permission denied: {event.tool} ({event.reason})]", flush=True)
         elif isinstance(event, ToolCallFinished):
             text = tool_result_to_text(event.result.content)
             if len(text) > _TOOL_RESULT_PREVIEW_LEN:

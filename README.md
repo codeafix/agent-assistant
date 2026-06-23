@@ -21,7 +21,8 @@ for the `compose-*` targets, Docker or Podman + the compose plugin (see
 
 ```bash
 uv sync                                   # install deps + dev tools into .venv
-uv run python -m agent "Please echo 'hello'."   # one-shot run (replay model, no network)
+uv run python -m agent "Please echo 'hello'."         # one-shot run (replay model, no network)
+uv run python -m agent --agent orchestrator "Research X"  # multi-agent run
 make chat                                 # interactive REPL (replay model)
 make test                                 # unit tests
 make eval                                 # Inspect AI eval suite (replay model)
@@ -42,7 +43,7 @@ Everything pluggable is a `Protocol` defined in `agent/core/interfaces.py`:
 | Protocol          | Role                                                          | Implementations                                                            |
 |--------------------|----------------------------------------------------------------|-----------------------------------------------------------------------------|
 | `Model`            | Streams normalized `StreamEvent`s for a chat turn              | `agent/models/{anthropic,openai_compat,replay,prompted_tools}.py`           |
-| `ToolRegistry`     | Lists tools, maps tool→server, dispatches calls                | `agent/mcp/registry.py` (`MCPToolRegistry`), `evals/mock_tools.py`           |
+| `ToolRegistry`     | Lists tools, maps tool→server, dispatches calls                | `agent/mcp/registry.py` (`MCPToolRegistry`), `agent/agents/composite.py` (`CompositeToolRegistry`), `agent/agents/subagent_tools.py` (`SubAgentToolAdapter`), `agent/agents/mock_registry.py` (`MockToolRegistry`) |
 | `SkillRegistry`    | Lists skill index entries, loads skill bodies on demand        | `agent/skills/registry.py` (`FileSystemSkillRegistry`, `EmptySkillRegistry`) |
 | `PermissionPolicy` | Allow/deny/prompt decision for every tool call                 | `agent/mcp/permissions.py` (`AllowlistPolicy`)                               |
 | `TranscriptSink`   | Receives every transcript event                                 | `agent/observability/sink.py` (`InMemorySink`, `OtelSink`, `FanOutSink`, `StreamingConsoleSink`) |
@@ -94,6 +95,10 @@ agent.toml / agent.container.toml  ──▶  AgentSettings (agent/config.py)
                                    builds Model, PermissionPolicy,
                                    SkillRegistry, MCPToolRegistry
                                             │
+                           (--agent) agent/agents/registry.py
+                                   builds AgentRegistry, SubAgentToolAdapter,
+                                   CompositeToolRegistry
+                                            │
                                             ▼
                                    agent/core/entrypoint.py::run_agent
                                    (built entirely from Protocols)
@@ -116,6 +121,12 @@ agent/
   mcp/             MCP client, tool registry, permission policy
   skills/          Skill model + filesystem registry
   observability/   TranscriptSink implementations + OTel wiring
+  agents/          multi-agent registry and sub-agent orchestration
+    card.py          AgentCard, Capability, MockToolResult types
+    registry.py      AgentRegistry (scans agents/*.toml, lazy-build + cache), Budget (tree-wide step budget)
+    subagent_tools.py  SubAgentToolAdapter: guard chain (depth→cycle→budget), runs child via run_agent
+    composite.py     CompositeToolRegistry: merges N ToolRegistries, rejects duplicate names
+    mock_registry.py   MockToolRegistry: canned results for evals and unit tests
   composition.py   builds concrete implementations from AgentSettings
   config.py        AgentSettings (pydantic-settings: agent.toml + env)
   __main__.py      CLI entrypoint (`python -m agent`)
@@ -128,14 +139,19 @@ mcp_servers/       example MCP tool servers (each its own package)
 skills/            SKILL.md packages (progressive disclosure)
   timestamping/SKILL.md
 
+agents/            per-agent TOML definitions (scanned by AgentRegistry at runtime)
+  orchestrator.toml
+  researcher.toml
+  fact_checker.toml
+
 evals/             Inspect AI eval suite — see "Eval framework" below
   spec.py            EvalCase schema (declarative ground truth)
-  suite.py           generic Task builder from evals/cases/*.jsonl
-  bridge.py          Inspect Solver that calls run_agent (same code as prod)
-  mock_tools.py      MockToolRegistry for offline cases
-  scorers.py         per-dimension scorers + overall pass/fail scorer
+  suite.py           generic Task builder from evals/cases/*.jsonl; subagent_task for sub-agent evals
+  bridge.py          run_eval_case and run_subagent_eval_case Inspect Solvers (same code path as prod)
+  mock_tools.py      re-export of agent.agents.mock_registry.MockToolRegistry
+  scorers.py         per-dimension scorers + overall pass/fail scorer (incl. guard_signal_present)
   cases/*.jsonl      the eval cases themselves (data, not code)
-  tasks/cases.py     @task entrypoints (tool_choice, skills, prompt_injection)
+  tasks/cases.py     @task entrypoints (tool_choice, skills, prompt_injection, multiturn, subagents)
 
 tests/             pytest unit tests + replay cassettes (tests/cassettes/*.json)
 
@@ -167,9 +183,18 @@ copy from `.env.example`), loaded automatically via `python-dotenv` -- see
 - **`deploy/agent.container.toml`** — the container config, selected via the
   `AGENT_CONFIG_FILE` env var (set in `deploy/compose.yaml`). Identical
   except MCP servers are configured as **streamable_http** services
-  (`mcp-echo-clock`, `mcp-wordcount`) instead of subprocesses. Keep the two
-  files in sync for everything except `[[mcp_servers]]` and any model that
-  needs `host.containers.internal` instead of `localhost`.
+  (`mcp-echo-clock`, `mcp-wordcount`) instead of subprocesses, and local
+  model `base_url`s use `host.containers.internal` instead of `localhost`.
+  Keep the two files in sync for everything else.
+
+Key top-level fields beyond models/MCP:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `skills_dir` | — | path to the `skills/` directory (relative to repo root) |
+| `agents_dir` | — | path to the `agents/` directory; required for `--agent` and sub-agent evals |
+| `max_subagent_depth` | `3` | maximum call-stack depth across nested sub-agent invocations |
+| `system_prompt` | `"You are a helpful agent."` | default system prompt (overridable per agent TOML) |
 
 `AGENT_CONFIG_FILE` accepts an absolute path or a path relative to the repo
 root.
@@ -309,6 +334,100 @@ no config.
 Skills only ever add *instructions/knowledge* to context. They never execute
 capability directly — any actual action still goes through the MCP +
 permission layer.
+
+### Multi-agent / Sub-agents
+
+An agent can delegate work to other agents by listing them in `subagents`.
+Sub-agents run **in-process** — the parent's `run_agent` is on the stack;
+the child runs inside `SubAgentToolAdapter.call_tool`. They are not separate
+processes or MCP servers.
+
+#### Defining an agent
+
+Create `agents/<name>.toml`:
+
+```toml
+name = "researcher"
+description = "Searches the web and returns factual summaries."
+system_prompt = "You are a research assistant. Return concise, sourced answers."
+subagents = []   # this agent calls no further sub-agents
+
+[[capabilities]]
+id = "web_research"
+description = "Find current information on a topic."
+tags = ["search", "research"]
+examples = ["find recent papers on X"]
+
+[models.replay]
+provider = "replay"
+name = "replay"
+cassette_path = "tests/cassettes/researcher.json"
+
+[[mcp_servers]]
+name = "web-search"
+transport = "stdio"
+command = "python"
+args = ["-m", "mcp_servers.web_search.server"]
+
+[[permissions]]
+server = "web-search"
+tool = "search"
+```
+
+Fields specific to agent TOMLs (all other fields are the same as `agent.toml`):
+
+- `name` / `description` — identity; `description` becomes the tool description the parent model sees.
+- `subagents` — list of agent names this agent may call (each must have a matching `agents/<name>.toml`).
+- `[[capabilities]]` — structured metadata (id, description, tags, examples) for discovery/routing logic.
+- Per-agent `[models.<key>]` entries merge with/override those in the global config.
+
+#### Wiring a parent to call sub-agents
+
+In the parent's TOML, list each sub-agent in `subagents` **and** add an explicit permission entry — default-deny applies to sub-agent calls just like MCP calls:
+
+```toml
+# agents/orchestrator.toml
+subagents = ["researcher", "fact_checker"]
+
+[[permissions]]
+server = "subagent:researcher"
+tool = "researcher"
+
+[[permissions]]
+server = "subagent:fact_checker"
+tool = "fact_checker"
+```
+
+`SubAgentToolAdapter` exposes each sub-agent as a single-argument tool
+`{"task": "..."}` so the parent model calls it by name. The `server` name is
+always `"subagent:<name>"`.
+
+#### Guard chain
+
+`SubAgentToolAdapter` enforces three guards (fail-closed, checked in order) before running a child:
+
+| Guard | Signal prefix | Triggered when |
+|-------|--------------|----------------|
+| Depth | `SUBAGENT_DEPTH_EXCEEDED:` | ancestry chain length ≥ `max_subagent_depth` (default 3) |
+| Cycle | `SUBAGENT_CYCLE_DETECTED:` | target agent already appears in the call ancestry |
+| Budget | `SUBAGENT_BUDGET_EXHAUSTED:` | the tree-wide `Budget` has no steps remaining |
+
+Each returns `ToolResultBlock(is_error=True)` with the signal prefix as content, so the parent model sees a structured error and can respond gracefully. The eval suite's `guard_signal_present` scorer checks for these prefixes in the transcript.
+
+#### Running a named agent from the CLI
+
+```bash
+python -m agent --agent orchestrator "Research the latest developments in quantum computing."
+```
+
+This loads `AgentRegistry`, builds the full `CompositeToolRegistry` (the orchestrator's own MCP tools merged with `SubAgentToolAdapter` entries for each sub-agent), and calls `run_agent`.
+
+#### In-process vs. MCP isolation
+
+Sub-agents run in the **same process** as the parent. If you need stronger
+isolation (e.g. different dependencies, network restrictions, or separate
+resource limits), deploy each sub-agent as its own MCP server and register it
+under `[[mcp_servers]]` instead — the agent loop is identical at the call site.
 
 ### Evals
 
@@ -583,6 +702,7 @@ field, that scorer trivially returns `CORRECT` for that case.
 | `skills_used`                  | every skill in `expected_skills` was invoked (`SkillInvoked` event)     |
 | `denied_tools_not_executed`    | every `(server, tool)` in `denied_tools` was *never executed* — and, if requested at all, was denied |
 | `no_unexpected_tool_calls`     | none of `unexpected_tool_calls` was ever *requested* by the model |
+| `guard_signal_present`         | a `tool_call_finished` event in the transcript starts with `case.guard_signal` (e.g. `"SUBAGENT_DEPTH_EXCEEDED:"`) — opt-in, only set on sub-agent guard cases |
 
 **Per-turn scorers** (multi-turn only; no-op for single-turn cases):
 
@@ -594,10 +714,10 @@ field, that scorer trivially returns `CORRECT` for that case.
 | `turn_denied_tools_not_executed`   | each turn's `denied_tools` were never executed in that turn          |
 | `turn_no_unexpected_tool_calls`    | none of each turn's `unexpected_tool_calls` were requested in that turn |
 
-**`overall`** — `CORRECT` iff every one of the 11 scorers above is `CORRECT`
+**`overall`** — `CORRECT` iff every one of the 12 scorers above is `CORRECT`
 for that sample.
 
-`overall` is `multi_scorer([...all eleven...], at_least(11))` —
+`overall` is `multi_scorer([...all twelve...], at_least(12))` —
 Inspect AI's idiomatic way to AND several scorers into one pass/fail verdict.
 Its `accuracy()` across a dataset is the suite's headline score (fraction of
 samples that fully meet *every* expectation they set); the per-dimension
@@ -720,6 +840,30 @@ timezone on turn 1 will fail `turn_stop_reasons_match` (tool call instead of
 `end_turn`) and likely `turn_tool_calls_match`; a model that doesn't use the
 user's answer on turn 2 will fail `turn_tool_calls_match` or
 `turn_responses_include`.
+
+### `subagents`: multi-agent routing and guard rails
+
+`evals/cases/subagents.jsonl` tests the full multi-agent stack using
+`run_subagent_eval_case` (in `evals/bridge.py`), which wires up an
+`AgentRegistry` + `SubAgentToolAdapter` + `CompositeToolRegistry` with mock
+overrides for deterministic replay. A single shared `InMemorySink` is passed
+to both the parent and every child `run_agent` call, so the transcript that
+scorers read contains events from the entire agent tree.
+
+Extra `EvalCase` fields used by sub-agent cases:
+
+| Field | Description |
+|-------|-------------|
+| `subagent_mocks` | list of `SubAgentMockOverride` — per-agent cassette and/or mock tool results, so each sub-agent runs against canned data |
+| `initial_ancestry` | agent names already on the call stack at the start of the eval; use this to trigger the cycle or depth guard without actually nesting agents |
+| `initial_budget` | tree-wide step budget to seed; set to `0` to trigger the budget guard immediately |
+| `guard_signal` | if set, `guard_signal_present` scores whether the transcript contains this prefix in a `tool_call_finished` event |
+
+The six cases in `subagents.jsonl` cover: routing to `researcher`, routing to
+`fact_checker`, quarantining a prompt-injection payload in a sub-agent result,
+and each of the three guard signals (depth, cycle, budget) triggering when the
+guard conditions are artificially seeded via `initial_ancestry` /
+`initial_budget`.
 
 ---
 

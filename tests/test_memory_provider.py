@@ -36,7 +36,9 @@ class _NullTools:
     def server_for_tool(self, tool_name: str) -> str:
         return ""
 
-    async def call_tool(self, server: str, tool: str, args: dict[str, object]) -> ToolResultBlock:
+    async def call_tool(
+        self, server: str, tool: str, args: dict[str, object]
+    ) -> tuple[ToolResultBlock, Provenance]:
         raise NotImplementedError
 
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 from types import TracebackType
 
 from agent.config import MCPServerConfig
+from agent.core.events import Provenance
 from agent.core.messages import ToolResultBlock, ToolSpec
 from agent.mcp.client import MCPServerConnection
 
@@ -62,8 +63,11 @@ class MCPToolRegistry:
         except KeyError:
             raise KeyError(f"no MCP server provides tool '{tool_name}'") from None
 
-    async def call_tool(self, server: str, tool: str, args: dict[str, object]) -> ToolResultBlock:
+    async def call_tool(
+        self, server: str, tool: str, args: dict[str, object]
+    ) -> tuple[ToolResultBlock, Provenance]:
         connection = self._connections[server]
         result = await connection.call_tool(tool, args)
         content = [item.model_dump(mode="json") for item in result.content]
-        return ToolResultBlock(tool_use_id="", content=content, is_error=result.isError)
+        block = ToolResultBlock(tool_use_id="", content=content, is_error=result.isError)
+        return block, Provenance.TOOL_OUTPUT

@@ -22,9 +22,28 @@ import uuid
 
 from agent.agents.registry import AgentRegistry, Budget
 from agent.core.entrypoint import run_agent
+from agent.core.events import Provenance, ToolCallFinished, TranscriptEvent
 from agent.core.interfaces import ToolRegistry, TranscriptSink
 from agent.core.messages import Message, TextBlock, ToolResultBlock, ToolSpec
 from agent.core.state import Task
+
+
+def _effective_provenance(transcript: list[TranscriptEvent]) -> Provenance:
+    """High-water-mark-of-untrust across all ToolCallFinished events.
+
+    Propagates transitively: a sub-agent that called an MCP tool returns
+    TOOL_OUTPUT; one that only reasoned returns AGENT_REASONING. Nesting
+    composes because the child's own ToolCallFinished events already carry the
+    grandchild's effective provenance, so a poisoned grandchild surfaces as
+    TOOL_OUTPUT at every ancestor level.
+    """
+    provenances = [e.provenance for e in transcript if isinstance(e, ToolCallFinished)]
+    if Provenance.TOOL_OUTPUT in provenances:
+        return Provenance.TOOL_OUTPUT
+    if Provenance.USER_STATED in provenances:
+        return Provenance.USER_STATED
+    return Provenance.AGENT_REASONING
+
 
 _TASK_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -84,48 +103,62 @@ class SubAgentToolAdapter:
     def server_for_tool(self, tool_name: str) -> str:
         return f"subagent:{tool_name}"
 
-    async def call_tool(self, server: str, tool: str, args: dict[str, object]) -> ToolResultBlock:
+    async def call_tool(
+        self, server: str, tool: str, args: dict[str, object]
+    ) -> tuple[ToolResultBlock, Provenance]:
         # Guard 1: depth
         if len(self._ancestry) >= self._registry.max_subagent_depth:
-            return ToolResultBlock(
-                tool_use_id="",
-                content=(
-                    f"SUBAGENT_DEPTH_EXCEEDED: depth {len(self._ancestry) + 1} exceeds"
-                    f" max_subagent_depth={self._registry.max_subagent_depth}"
+            return (
+                ToolResultBlock(
+                    tool_use_id="",
+                    content=(
+                        f"SUBAGENT_DEPTH_EXCEEDED: depth {len(self._ancestry) + 1} exceeds"
+                        f" max_subagent_depth={self._registry.max_subagent_depth}"
+                    ),
+                    is_error=True,
                 ),
-                is_error=True,
+                Provenance.TOOL_OUTPUT,
             )
 
         # Guard 2: cycle
         full_chain = self._ancestry + (self._parent_name,)
         if tool in full_chain:
-            return ToolResultBlock(
-                tool_use_id="",
-                content=(
-                    f"SUBAGENT_CYCLE_DETECTED: '{tool}' already in ancestry {list(full_chain)}"
+            return (
+                ToolResultBlock(
+                    tool_use_id="",
+                    content=(
+                        f"SUBAGENT_CYCLE_DETECTED: '{tool}' already in ancestry {list(full_chain)}"
+                    ),
+                    is_error=True,
                 ),
-                is_error=True,
+                Provenance.TOOL_OUTPUT,
             )
 
         # Guard 3: budget
         if self._budget.is_exhausted:
-            return ToolResultBlock(
-                tool_use_id="",
-                content=(
-                    f"SUBAGENT_BUDGET_EXHAUSTED: 0 steps remaining of {self._budget.max_steps}"
+            return (
+                ToolResultBlock(
+                    tool_use_id="",
+                    content=(
+                        f"SUBAGENT_BUDGET_EXHAUSTED: 0 steps remaining of {self._budget.max_steps}"
+                    ),
+                    is_error=True,
                 ),
-                is_error=True,
+                Provenance.TOOL_OUTPUT,
             )
 
         runtime = await self._registry.get_runtime(tool)
         allocated = self._budget.allocate(runtime.settings.max_steps)
         if allocated == 0:
-            return ToolResultBlock(
-                tool_use_id="",
-                content=(
-                    f"SUBAGENT_BUDGET_EXHAUSTED: 0 steps remaining of {self._budget.max_steps}"
+            return (
+                ToolResultBlock(
+                    tool_use_id="",
+                    content=(
+                        f"SUBAGENT_BUDGET_EXHAUSTED: 0 steps remaining of {self._budget.max_steps}"
+                    ),
+                    is_error=True,
                 ),
-                is_error=True,
+                Provenance.TOOL_OUTPUT,
             )
 
         child_ancestry = full_chain
@@ -166,8 +199,11 @@ class SubAgentToolAdapter:
         self._budget.consume(allocated)
 
         text = result.final_text()
-        return ToolResultBlock(
-            tool_use_id="",
-            content=text if text else f"Sub-agent '{tool}' completed with no output.",
-            is_error=False,
+        return (
+            ToolResultBlock(
+                tool_use_id="",
+                content=text if text else f"Sub-agent '{tool}' completed with no output.",
+                is_error=False,
+            ),
+            _effective_provenance(result.transcript),
         )

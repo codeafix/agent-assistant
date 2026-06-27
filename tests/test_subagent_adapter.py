@@ -6,6 +6,7 @@ from agent.agents.card import AgentCard
 from agent.agents.mock_registry import MockToolRegistry
 from agent.agents.registry import Budget
 from agent.agents.subagent_tools import SubAgentToolAdapter
+from agent.core.events import Provenance
 from agent.core.messages import ToolResultBlock
 from agent.observability.sink import InMemorySink
 
@@ -83,9 +84,10 @@ async def test_depth_guard_fires_when_ancestry_at_max() -> None:
     registry = _StubRegistry(max_depth=3)
     # ancestry length == max_depth → next call would be depth 4
     adapter = _adapter(registry=registry, ancestry=("a", "b", "c"))
-    result = await adapter.call_tool("subagent:researcher", "researcher", {"task": "x"})
+    result, provenance = await adapter.call_tool("subagent:researcher", "researcher", {"task": "x"})
     assert isinstance(result, ToolResultBlock)
     assert result.is_error
+    assert provenance == Provenance.TOOL_OUTPUT
     content = result.content
     assert isinstance(content, str)
     assert content.startswith("SUBAGENT_DEPTH_EXCEEDED:")
@@ -93,9 +95,10 @@ async def test_depth_guard_fires_when_ancestry_at_max() -> None:
 
 async def test_cycle_guard_fires_when_tool_in_ancestry() -> None:
     adapter = _adapter(ancestry=("researcher",), parent_name="orchestrator")
-    result = await adapter.call_tool("subagent:researcher", "researcher", {"task": "x"})
+    result, provenance = await adapter.call_tool("subagent:researcher", "researcher", {"task": "x"})
     assert isinstance(result, ToolResultBlock)
     assert result.is_error
+    assert provenance == Provenance.TOOL_OUTPUT
     content = result.content
     assert isinstance(content, str)
     assert content.startswith("SUBAGENT_CYCLE_DETECTED:")
@@ -103,9 +106,10 @@ async def test_cycle_guard_fires_when_tool_in_ancestry() -> None:
 
 async def test_cycle_guard_fires_when_tool_is_parent_itself() -> None:
     adapter = _adapter(ancestry=(), parent_name="researcher")
-    result = await adapter.call_tool("subagent:researcher", "researcher", {"task": "x"})
+    result, provenance = await adapter.call_tool("subagent:researcher", "researcher", {"task": "x"})
     assert isinstance(result, ToolResultBlock)
     assert result.is_error
+    assert provenance == Provenance.TOOL_OUTPUT
     content = result.content
     assert isinstance(content, str)
     assert content.startswith("SUBAGENT_CYCLE_DETECTED:")
@@ -113,9 +117,10 @@ async def test_cycle_guard_fires_when_tool_is_parent_itself() -> None:
 
 async def test_budget_guard_fires_when_exhausted() -> None:
     adapter = _adapter(budget=Budget.new(0))
-    result = await adapter.call_tool("subagent:researcher", "researcher", {"task": "x"})
+    result, provenance = await adapter.call_tool("subagent:researcher", "researcher", {"task": "x"})
     assert isinstance(result, ToolResultBlock)
     assert result.is_error
+    assert provenance == Provenance.TOOL_OUTPUT
     content = result.content
     assert isinstance(content, str)
     assert content.startswith("SUBAGENT_BUDGET_EXHAUSTED:")
@@ -165,9 +170,13 @@ async def test_successful_call_returns_final_text() -> None:
         sink=InMemorySink(),
     )
 
-    result = await adapter.call_tool("subagent:researcher", "researcher", {"task": "research X"})
+    result, provenance = await adapter.call_tool(
+        "subagent:researcher", "researcher", {"task": "research X"}
+    )
     assert isinstance(result, ToolResultBlock)
     assert not result.is_error
+    # Researcher cassette has no tool calls → purely reasoning → AGENT_REASONING
+    assert provenance == Provenance.AGENT_REASONING
     content = result.content
     assert isinstance(content, str)
     assert len(content) > 0

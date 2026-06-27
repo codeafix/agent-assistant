@@ -31,7 +31,12 @@ async def test_registry_merges_tools_from_multiple_servers() -> None:
         assert tools.server_for_tool("clock") == "echo-clock"
         assert tools.server_for_tool("count_words") == "wordcount"
 
-        result = await tools.call_tool("wordcount", "count_words", {"text": "one two three"})
+        from agent.core.events import Provenance
+
+        result, provenance = await tools.call_tool(
+            "wordcount", "count_words", {"text": "one two three"}
+        )
+        assert provenance == Provenance.TOOL_OUTPUT
         assert result.is_error is False
         assert isinstance(result.content, list)
         assert result.content[0]["type"] == "text"

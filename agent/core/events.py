@@ -86,6 +86,7 @@ class ModelCallFinished(EventBase):
 class ModelTextDelta(EventBase):
     type: Literal["model_text_delta"] = "model_text_delta"
     text: str
+    provenance: Provenance = Provenance.AGENT_REASONING
 
 
 class ToolCallRequested(EventBase):
@@ -119,12 +120,20 @@ class ToolCallStarted(EventBase):
     tool: str
 
 
+class UserTurnReceived(EventBase):
+    type: Literal["user_turn_received"] = "user_turn_received"
+    content: str
+    provenance: Provenance = Provenance.USER_STATED
+
+
 class ToolCallFinished(EventBase):
     type: Literal["tool_call_finished"] = "tool_call_finished"
     tool_use_id: str
     result: ToolResultBlock
     is_error: bool
     latency_ms: float
+    provenance: Provenance = Provenance.TOOL_OUTPUT
+    source: str = ""
 
 
 class Error(EventBase):
@@ -141,6 +150,7 @@ TranscriptEvent = Annotated[
     | ModelCallStarted
     | ModelCallFinished
     | ModelTextDelta
+    | UserTurnReceived
     | ToolCallRequested
     | PermissionDecided
     | SkillInvoked

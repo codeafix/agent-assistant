@@ -1,0 +1,29 @@
+{
+  "turns": [
+    [
+      {
+        "type": "tool_call_complete",
+        "block": {
+          "type": "tool_use",
+          "id": "call_1",
+          "name": "test_tool",
+          "input": {}
+        }
+      },
+      {
+        "type": "done",
+        "stop_reason": "tool_use"
+      }
+    ],
+    [
+      {
+        "type": "text_delta",
+        "text": "The tool returned ok."
+      },
+      {
+        "type": "done",
+        "stop_reason": "end_turn"
+      }
+    ]
+  ]
+}

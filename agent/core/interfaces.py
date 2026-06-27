@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Protocol, runtime_checkable
 
-from agent.core.events import Decision, TranscriptEvent
+from agent.core.events import Decision, Provenance, TranscriptEvent
 from agent.core.memory import MemoryRecord
 from agent.core.messages import Message, ToolResultBlock, ToolSpec
 from agent.core.state import Task
@@ -52,7 +52,7 @@ class ToolRegistry(Protocol):
 
     async def call_tool(
         self, server: str, tool: str, args: dict[str, object]
-    ) -> ToolResultBlock: ...
+    ) -> tuple[ToolResultBlock, Provenance]: ...
 
 
 @runtime_checkable

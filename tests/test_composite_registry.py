@@ -5,6 +5,7 @@ import pytest
 from agent.agents.card import MockToolResult
 from agent.agents.composite import CompositeToolRegistry
 from agent.agents.mock_registry import MockToolRegistry
+from agent.core.events import Provenance
 from agent.core.messages import ToolResultBlock
 
 
@@ -45,8 +46,9 @@ def test_server_for_unknown_tool_raises_key_error() -> None:
 
 async def test_call_tool_routes_to_correct_registry() -> None:
     composite = CompositeToolRegistry([_echo_mock(), _clock_mock()])
-    result = await composite.call_tool("s2", "clock", {})
+    result, provenance = await composite.call_tool("s2", "clock", {})
     assert isinstance(result, ToolResultBlock)
+    assert provenance == Provenance.TOOL_OUTPUT
     content = result.content
     assert isinstance(content, list)
     assert any("12:00" in str(c) for c in content)

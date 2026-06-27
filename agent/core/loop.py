@@ -257,6 +257,7 @@ async def _execute_tool_calls(
             continue
 
         server = tools.server_for_tool(block.name)
+        source = server if server.startswith("subagent:") else f"tool:{block.name}"
 
         key = _call_key(block.name, block.input)
         call_counts[key] += 1
@@ -336,8 +337,9 @@ async def _execute_tool_calls(
             )
         )
         tool_start = time.monotonic()
+        call_provenance = Provenance.TOOL_OUTPUT
         try:
-            result = await tools.call_tool(server, block.name, block.input)
+            result, call_provenance = await tools.call_tool(server, block.name, block.input)
             result.tool_use_id = block.id
         except Exception as exc:  # noqa: BLE001 - surfaced to the model as a tool error
             result = ToolResultBlock(tool_use_id=block.id, content=str(exc), is_error=True)
@@ -351,6 +353,8 @@ async def _execute_tool_calls(
                 result=result,
                 is_error=result.is_error,
                 latency_ms=tool_latency_ms,
+                provenance=call_provenance,
+                source=source,
             )
         )
         results.append(result)

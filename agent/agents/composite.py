@@ -8,6 +8,7 @@ allowlist then gates every call as normal.
 
 from __future__ import annotations
 
+from agent.core.events import Provenance
 from agent.core.interfaces import ToolRegistry
 from agent.core.messages import ToolResultBlock, ToolSpec
 
@@ -40,7 +41,9 @@ class CompositeToolRegistry:
         except KeyError:
             raise KeyError(f"no registry provides tool '{tool_name}'") from None
 
-    async def call_tool(self, server: str, tool: str, args: dict[str, object]) -> ToolResultBlock:
+    async def call_tool(
+        self, server: str, tool: str, args: dict[str, object]
+    ) -> tuple[ToolResultBlock, Provenance]:
         try:
             reg = self._tool_to_registry[tool]
         except KeyError:

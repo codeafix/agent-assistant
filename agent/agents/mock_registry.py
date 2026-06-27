@@ -10,6 +10,7 @@ from __future__ import annotations
 from types import TracebackType
 
 from agent.agents.card import MockToolResult
+from agent.core.events import Provenance
 from agent.core.messages import ToolResultBlock, ToolSpec
 
 
@@ -46,10 +47,15 @@ class MockToolRegistry:
         except KeyError:
             raise KeyError(f"no mock tool result registered for '{tool_name}'") from None
 
-    async def call_tool(self, server: str, tool: str, args: dict[str, object]) -> ToolResultBlock:
+    async def call_tool(
+        self, server: str, tool: str, args: dict[str, object]
+    ) -> tuple[ToolResultBlock, Provenance]:
         mock = self._mocks[(server, tool)]
-        return ToolResultBlock(
-            tool_use_id="",
-            content=[{"type": "text", "text": mock.content}],
-            is_error=mock.is_error,
+        return (
+            ToolResultBlock(
+                tool_use_id="",
+                content=[{"type": "text", "text": mock.content}],
+                is_error=mock.is_error,
+            ),
+            Provenance.TOOL_OUTPUT,
         )

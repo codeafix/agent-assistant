@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import uuid
 
-from agent.core.events import RunFinished, RunStarted
+from agent.core.events import Provenance, RunFinished, RunStarted, UserTurnReceived
 from agent.core.interfaces import (
     HumanApproval,
     MemoryProvider,
@@ -18,6 +18,7 @@ from agent.core.interfaces import (
 )
 from agent.core.loop import compose_system_prompt, run_steps
 from agent.core.memory import MemoryRecord
+from agent.core.messages import TextBlock
 from agent.core.state import RunResult, Task
 from agent.observability.sink import FanOutSink, InMemorySink
 
@@ -55,6 +56,22 @@ async def run_agent(
     messages = list(task.messages)
 
     await fanout.emit(RunStarted(run_id=run_id, task_name=task.id))
+
+    user_text = ""
+    for msg in reversed(task.messages):
+        if msg.role == "user":
+            for block in msg.content:
+                if isinstance(block, TextBlock):
+                    user_text = block.text
+                    break
+            break
+    await fanout.emit(
+        UserTurnReceived(
+            run_id=run_id,
+            content=user_text,
+            provenance=Provenance.USER_STATED,
+        )
+    )
 
     final_message, stop_reason, usage = await run_steps(
         run_id,

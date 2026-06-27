@@ -22,6 +22,7 @@ from inspect_ai.model import ChatMessageAssistant, ChatMessageUser, ModelOutput
 from inspect_ai.solver import Generate, Solver, TaskState, solver
 
 from agent.agents.composite import CompositeToolRegistry
+from agent.agents.mock_registry import MockToolRegistry as AgentMockRegistry
 from agent.agents.registry import AgentRegistry, Budget
 from agent.agents.subagent_tools import SubAgentToolAdapter
 from agent.composition import (
@@ -32,14 +33,22 @@ from agent.composition import (
 )
 from agent.config import AgentSettings
 from agent.core.entrypoint import run_agent
+from agent.core.events import Provenance
 from agent.core.interfaces import MemoryProvider, Model, PermissionPolicy, ToolRegistry
 from agent.core.memory import MemoryRecord
 from agent.core.messages import Message, TextBlock
 from agent.core.state import Task
+from agent.mcp.permissions import AllowlistPolicy
 from agent.mcp.registry import MCPToolRegistry
+from agent.memory.consolidation import (
+    CONSOLIDATOR_SYSTEM_PROMPT,
+    apply_promotion_gate,
+    parse_ops,
+)
 from agent.memory.provider import EmptyMemoryProvider, FixedMemoryProvider
 from agent.models.replay import ReplayModel
 from agent.observability.sink import InMemorySink
+from agent.skills.registry import EmptySkillRegistry
 from evals.mock_tools import MockToolRegistry
 from evals.spec import EvalCase
 
@@ -276,6 +285,73 @@ def run_subagent_eval_case(agent_name: str = "orchestrator", model: str = "repla
         state.messages.append(ChatMessageAssistant(content=final_text))
         # Use shared_sink.events so scorers see parent + child events.
         state.store.set("transcript", [e.model_dump(mode="json") for e in shared_sink.events])
+        state.store.set("stop_reason", result.stop_reason)
+
+        return state
+
+    return solve
+
+
+@solver
+def run_consolidation_eval_case(model: str = "replay") -> Solver:
+    """Run a memory consolidation eval case through the full parse→gate pipeline.
+
+    The case's `input` is passed as the consolidator's user message. `seed_episodes`
+    provides the episode provenance map the gate uses to re-derive trust
+    (independent of what the model claims). After the run, `state.store["gated_ops"]`
+    holds the gate's decisions as JSON-serialised MemoryOp dicts so that
+    `memory_promoted`, `memory_not_promoted`, and `provenance_blocked` scorers
+    can grade the result without coupling to the write path.
+    """
+    settings = AgentSettings()  # type: ignore[call-arg]
+    real_model: Model | None = (
+        None if model == "replay" else build_model(settings.resolve_model(model))
+    )
+
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        case = state.metadata_as(EvalCase)
+
+        # Build episode provenance map from the case fixture.
+        episode_provenances: dict[str, Provenance] = {}
+        for ep in case.seed_episodes:
+            ep_id = str(ep.get("id", ""))
+            ep_prov = str(ep.get("provenance", "tool_output"))
+            try:
+                episode_provenances[ep_id] = Provenance(ep_prov)
+            except ValueError:
+                episode_provenances[ep_id] = Provenance.TOOL_OUTPUT
+
+        active_model: Model = real_model or ReplayModel(
+            CASSETTES_DIR / case.cassette, name="replay"
+        )
+        agent_task = Task(
+            id=str(state.sample_id),
+            system_prompt=CONSOLIDATOR_SYSTEM_PROMPT,
+            messages=[Message(role="user", content=[TextBlock(text=state.input_text)])],
+        )
+
+        # Consolidator has no MCP tools — context is passed via the prompt.
+        empty_tools = AgentMockRegistry([])
+        sink = InMemorySink()
+        result = await run_agent(
+            agent_task,
+            model=active_model,
+            tools=empty_tools,
+            skills=EmptySkillRegistry(),
+            permissions=AllowlistPolicy([]),
+            sink=sink,
+            max_steps=settings.max_steps,
+        )
+
+        # Parse ops and apply the deterministic gate.
+        ops = parse_ops(result.final_text())
+        gated = apply_promotion_gate(ops, episode_provenances)
+
+        final_text = result.final_text()
+        state.output = ModelOutput.from_content(model=active_model.name, content=final_text)
+        state.messages.append(ChatMessageAssistant(content=final_text))
+        state.store.set("gated_ops", [op.model_dump(mode="json") for op in gated])
+        state.store.set("transcript", [e.model_dump(mode="json") for e in result.transcript])
         state.store.set("stop_reason", result.stop_reason)
 
         return state

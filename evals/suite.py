@@ -16,12 +16,15 @@ from typing import Any
 from inspect_ai import Task
 from inspect_ai.dataset import Sample, json_dataset
 
-from evals.bridge import run_eval_case, run_subagent_eval_case
+from evals.bridge import run_consolidation_eval_case, run_eval_case, run_subagent_eval_case
 from evals.scorers import (
     denied_tools_not_executed,
     guard_signal_present,
+    memory_not_promoted,
+    memory_promoted,
     no_unexpected_tool_calls,
     overall,
+    provenance_blocked,
     response_includes,
     skills_used,
     stop_reason_matches,
@@ -80,6 +83,25 @@ def subagent_task(
         solver=run_subagent_eval_case(agent_name, model),
         epochs=epochs,
         scorer=all_scorers,
+    )
+
+
+def consolidation_task(filename: str, model: str = "replay", epochs: int = 1) -> Task:
+    """Like `case_task`, but uses `run_consolidation_eval_case` as the solver so
+    the full parse → gate pipeline is exercised. Includes the three memory
+    consolidation scorers in addition to the standard suite."""
+    return Task(
+        dataset=json_dataset(str(CASES_DIR / filename), sample_fields=_record_to_sample),
+        solver=run_consolidation_eval_case(model),
+        epochs=epochs,
+        scorer=[
+            overall(),
+            response_includes(),
+            stop_reason_matches(),
+            memory_promoted(),
+            memory_not_promoted(),
+            provenance_blocked(),
+        ],
     )
 
 

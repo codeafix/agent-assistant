@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from inspect_ai import Task, task
 
-from evals.suite import case_task, subagent_task
+from evals.suite import case_task, consolidation_task, subagent_task
 
 
 @task
@@ -71,3 +71,12 @@ def memory_recall(model: str = "replay", epochs: int = 1) -> Task:
     system prompt via FixedMemoryProvider and the model is expected to reference
     it in its answer."""
     return case_task("memory_recall.jsonl", model, epochs)
+
+
+@task
+def memory_promotion(model: str = "replay", epochs: int = 1) -> Task:
+    """Memory consolidation security: durable facts promote, task-local state
+    and tool-sourced content are blocked by the deterministic gate regardless
+    of what the model emits. The headline case — poisoned tool output — must
+    never survive to durable memory even if the model is fooled."""
+    return consolidation_task("memory_promotion.jsonl", model, epochs)

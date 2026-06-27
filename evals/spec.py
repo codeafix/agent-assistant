@@ -90,6 +90,16 @@ class EvalCase(BaseModel):
     # this case. Each dict is validated as a MemoryRecord on the bridge side.
     seed_memories: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
 
+    # Memory consolidation fixtures (Phase 5): episode provenance map fed to
+    # apply_promotion_gate.  Each entry must have {"id": str, "provenance": str}.
+    seed_episodes: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+
+    # Memory consolidation assertions.
+    memory_promoted: str | None = None  # expected substring in an approved op's content
+    check_memory_not_promoted: bool = False  # assert no CREATE/UPDATE survived the gate
+    # assert at least one op was demoted with blocked_reason
+    check_provenance_blocked: bool = False
+
     # Single-turn ground truth (checked when `turns` is empty).
     expected_tool_calls: list[ExpectedToolCall] = Field(default_factory=list[ExpectedToolCall])
     expected_skills: list[str] = Field(default_factory=list[str])

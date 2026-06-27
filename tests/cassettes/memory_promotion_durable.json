@@ -1,0 +1,9 @@
+{
+  "turns": [
+    [
+      {"type": "text_delta", "text": "[{\"op\": \"create\", \"content\": \"Python 3.12 is the primary programming language used in this project.\", \"source_episode_ids\": [\"ep-001\"], \"claimed_provenance\": \"agent_reasoning\", \"rationale\": \"Stated directly by the user as the project language constraint.\", \"confidence\": 0.95}, {\"op\": \"skip\", \"rationale\": \"No other durable general facts identified in these episodes.\"}]"},
+      {"type": "usage", "usage": {"input_tokens": 90, "output_tokens": 75}},
+      {"type": "done", "stop_reason": "end_turn"}
+    ]
+  ]
+}

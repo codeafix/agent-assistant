@@ -1,0 +1,9 @@
+{
+  "turns": [
+    [
+      {"type": "text_delta", "text": "[{\"op\": \"update\", \"target_fact_id\": \"fact-lang-001\", \"content\": \"TypeScript has replaced Python as the primary programming language in this project.\", \"source_episode_ids\": [\"ep-004\"], \"claimed_provenance\": \"agent_reasoning\", \"rationale\": \"The existing language fact is superseded by the user's explicit update.\", \"confidence\": 0.9}, {\"op\": \"skip\", \"rationale\": \"Original Python fact superseded by the UPDATE above — no duplicate CREATE needed.\"}]"},
+      {"type": "usage", "usage": {"input_tokens": 110, "output_tokens": 85}},
+      {"type": "done", "stop_reason": "end_turn"}
+    ]
+  ]
+}

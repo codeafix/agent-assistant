@@ -1,0 +1,9 @@
+{
+  "turns": [
+    [
+      {"type": "text_delta", "text": "[{\"op\": \"skip\", \"rationale\": \"Task-local state: three claims still need verifying before they can be promoted to durable memory.\"}, {\"op\": \"skip\", \"rationale\": \"Open work items are not suitable for long-term semantic memory.\"}]"},
+      {"type": "usage", "usage": {"input_tokens": 85, "output_tokens": 55}},
+      {"type": "done", "stop_reason": "end_turn"}
+    ]
+  ]
+}

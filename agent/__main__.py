@@ -21,7 +21,7 @@ from opentelemetry.trace import Tracer
 from agent.agents.composite import CompositeToolRegistry
 from agent.agents.registry import AgentRegistry, Budget
 from agent.agents.subagent_tools import SubAgentToolAdapter
-from agent.composition import build_model, build_permissions, build_skills
+from agent.composition import build_memory_provider, build_model, build_permissions, build_skills
 from agent.config import AgentSettings
 from agent.core.entrypoint import run_agent
 from agent.core.interfaces import Model, PermissionPolicy, SkillRegistry, ToolRegistry
@@ -69,6 +69,7 @@ async def main(argv: list[str]) -> int:
         model = build_model(model_config)
         permissions = build_permissions(settings)
         skills = build_skills(settings)
+        memory_provider = build_memory_provider(settings)
 
         async with MCPToolRegistry(settings.mcp_servers) as tools:
             if args.chat:
@@ -96,6 +97,7 @@ async def main(argv: list[str]) -> int:
                     permissions=permissions,
                     sink=OtelSink(tracer),
                     max_steps=settings.max_steps,
+                    memory_provider=memory_provider,
                 )
 
                 print(f"stop_reason: {result.stop_reason}")

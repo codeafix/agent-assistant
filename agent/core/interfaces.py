@@ -12,7 +12,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Protocol, runtime_checkable
 
 from agent.core.events import Decision, TranscriptEvent
+from agent.core.memory import MemoryRecord
 from agent.core.messages import Message, ToolResultBlock, ToolSpec
+from agent.core.state import Task
 from agent.models.base import StreamEvent
 from agent.skills.base import Skill
 
@@ -81,3 +83,16 @@ class TranscriptSink(Protocol):
     in-memory sink for evals composed with an OTel-emitting sink)."""
 
     async def emit(self, event: TranscriptEvent) -> None: ...
+
+
+@runtime_checkable
+class MemoryProvider(Protocol):
+    """Retrieves relevant memories to inject into the system prompt.
+
+    This is the *only* new core Protocol added for the memory system. All
+    concrete retrieval logic lives in agent/memory/ (never imported by core).
+    Implementations must degrade gracefully: on backend failure return []
+    rather than propagating the exception.
+    """
+
+    async def recall(self, task: Task, *, scope: str) -> list[MemoryRecord]: ...

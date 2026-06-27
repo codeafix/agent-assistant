@@ -18,6 +18,7 @@ from agent.core.events import (
     ModelCallStarted,
     ModelTextDelta,
     PermissionDecided,
+    Provenance,
     SkillInvoked,
     StepFinished,
     StepStarted,
@@ -33,6 +34,7 @@ from agent.core.interfaces import (
     ToolRegistry,
     TranscriptSink,
 )
+from agent.core.memory import MemoryRecord
 from agent.core.messages import (
     ContentBlock,
     Message,
@@ -49,6 +51,12 @@ from agent.models.base import (
     Usage,
 )
 
+_PROVENANCE_LABELS: dict[Provenance, str] = {
+    Provenance.AGENT_REASONING: "agent",
+    Provenance.USER_STATED: "user",
+    Provenance.TOOL_OUTPUT: "tool — unverified",
+}
+
 # Guard rail: hard stop if the same (tool, args) call repeats this many times.
 MAX_REPEATED_TOOL_CALLS = 3
 
@@ -57,14 +65,27 @@ MAX_REPEATED_TOOL_CALLS = 3
 MAX_TOOL_CALLS_PER_STEP = 8
 
 
-def compose_system_prompt(base: str, skills: SkillRegistry) -> str:
-    """Base instructions + skill index (names/descriptions only)."""
+def compose_system_prompt(
+    base: str,
+    skills: SkillRegistry,
+    memories: list[MemoryRecord] | None = None,
+) -> str:
+    """Base instructions + skill index + relevant memories (when provided)."""
     skill_list = skills.list_skills()
-    if not skill_list:
-        return base
-    index_lines = [f"- {s.name}: {s.description} (use when: {s.when_to_use})" for s in skill_list]
-    header = "\n\nAvailable skills (call the matching tool to load full instructions):\n"
-    return base + header + "\n".join(index_lines)
+    result = base
+    if skill_list:
+        index_lines = [
+            f"- {s.name}: {s.description} (use when: {s.when_to_use})" for s in skill_list
+        ]
+        header = "\n\nAvailable skills (call the matching tool to load full instructions):\n"
+        result = result + header + "\n".join(index_lines)
+    if memories:
+        mem_lines = [
+            f"- [{_PROVENANCE_LABELS.get(m.provenance, m.provenance.value)}] {m.content}"
+            for m in memories
+        ]
+        result += "\n\n## Relevant memories\n" + "\n".join(mem_lines)
+    return result
 
 
 def _skill_tool_specs(skills: SkillRegistry) -> list[ToolSpec]:

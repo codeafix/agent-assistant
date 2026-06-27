@@ -63,3 +63,11 @@ def subagents(model: str = "replay", epochs: int = 1) -> Task:
     through the full AgentRegistry + SubAgentToolAdapter stack with mock/replay
     models for all agents in the tree."""
     return subagent_task("subagents.jsonl", "orchestrator", model, epochs)
+
+
+@task
+def memory_recall(model: str = "replay", epochs: int = 1) -> Task:
+    """Memory recall ground truth: a seeded semantic fact is injected into the
+    system prompt via FixedMemoryProvider and the model is expected to reference
+    it in its answer."""
+    return case_task("memory_recall.jsonl", model, epochs)

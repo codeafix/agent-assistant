@@ -47,6 +47,7 @@ Everything pluggable is a `Protocol` defined in `agent/core/interfaces.py`:
 | `SkillRegistry`    | Lists skill index entries, loads skill bodies on demand        | `agent/skills/registry.py` (`FileSystemSkillRegistry`, `EmptySkillRegistry`) |
 | `PermissionPolicy` | Allow/deny/prompt decision for every tool call                 | `agent/mcp/permissions.py` (`AllowlistPolicy`)                               |
 | `TranscriptSink`   | Receives every transcript event                                 | `agent/observability/sink.py` (`InMemorySink`, `OtelSink`, `FanOutSink`, `StreamingConsoleSink`) |
+| `MemoryProvider`   | Retrieves relevant memories to inject into the system prompt   | `agent/memory/provider.py` (`EmptyMemoryProvider`, `RagMemoryProvider`, `FixedMemoryProvider`) |
 
 `agent/core/loop.py::run_steps` is the bounded step loop. It is constructed
 *entirely* from these Protocols — it never imports a concrete
@@ -93,7 +94,8 @@ agent.toml / agent.container.toml  ──▶  AgentSettings (agent/config.py)
                                             ▼
                                    agent/composition.py
                                    builds Model, PermissionPolicy,
-                                   SkillRegistry, MCPToolRegistry
+                                   SkillRegistry, MCPToolRegistry,
+                                   MemoryProvider
                                             │
                            (--agent) agent/agents/registry.py
                                    builds AgentRegistry, SubAgentToolAdapter,
@@ -111,16 +113,21 @@ agent.toml / agent.container.toml  ──▶  AgentSettings (agent/config.py)
 ```
 agent/
   core/            the loop, Protocols, transcript events, message types — no provider/config imports
-    interfaces.py    the Protocols ("the seams")
+    interfaces.py    the Protocols ("the seams"), including MemoryProvider
     loop.py          run_steps: the bounded step loop + tool execution
     entrypoint.py    run_agent: run-level bookkeeping around run_steps
-    events.py        TranscriptEvent union (the source of truth)
+    events.py        TranscriptEvent union + Provenance enum (the source of truth)
     messages.py      provider-agnostic Message/ToolSpec/ContentBlock types
-    state.py         Task, RunResult
+    state.py         Task (+ task_id for cross-run memory scope), RunResult
+    memory.py        MemoryKind, MemoryRecord — core data types (no provider deps)
   models/          Model adapters (Anthropic, OpenAI-compatible, replay, prompted-tools shim)
   mcp/             MCP client, tool registry, permission policy
   skills/          Skill model + filesystem registry
   observability/   TranscriptSink implementations + OTel wiring
+  memory/          MemoryProvider implementations and MCP-backed store
+    provider.py      EmptyMemoryProvider, RagMemoryProvider, FixedMemoryProvider
+    store.py         MemoryStore Protocol + McpMemoryStore (markdown-rag MCP client)
+    records.py       EpisodicRecord, SemanticFact (Phase 3 write-path data model)
   agents/          multi-agent registry and sub-agent orchestration
     card.py          AgentCard, Capability, MockToolResult types
     registry.py      AgentRegistry (scans agents/*.toml, lazy-build + cache), Budget (tree-wide step budget)
@@ -151,7 +158,7 @@ evals/             Inspect AI eval suite — see "Eval framework" below
   mock_tools.py      re-export of agent.agents.mock_registry.MockToolRegistry
   scorers.py         per-dimension scorers + overall pass/fail scorer (incl. guard_signal_present)
   cases/*.jsonl      the eval cases themselves (data, not code)
-  tasks/cases.py     @task entrypoints (tool_choice, skills, prompt_injection, multiturn, subagents)
+  tasks/cases.py     @task entrypoints (tool_choice, skills, prompt_injection, multiturn, subagents, memory_recall)
 
 tests/             pytest unit tests + replay cassettes (tests/cassettes/*.json)
 
@@ -195,6 +202,12 @@ Key top-level fields beyond models/MCP:
 | `agents_dir` | — | path to the `agents/` directory; required for `--agent` and sub-agent evals |
 | `max_subagent_depth` | `3` | maximum call-stack depth across nested sub-agent invocations |
 | `system_prompt` | `"You are a helpful agent."` | default system prompt (overridable per agent TOML) |
+| `memory.enabled` | `false` | enable memory recall (see [Memory](#memory)) |
+| `memory.episodic_collection` | `"episodic"` | markdown-rag collection for per-run summaries |
+| `memory.semantic_collection` | `"semantic"` | markdown-rag collection for durable facts |
+| `memory.top_k` | `10` | max records retrieved from each collection |
+| `memory.token_budget` | `2000` | total token budget for injected memories (rough estimate: chars ÷ 4) |
+| `memory.server.*` | — | markdown-rag MCP server config (transport, url/command, search_tool) |
 
 `AGENT_CONFIG_FILE` accepts an absolute path or a path relative to the repo
 root.
@@ -334,6 +347,110 @@ no config.
 Skills only ever add *instructions/knowledge* to context. They never execute
 capability directly — any actual action still goes through the MCP +
 permission layer.
+
+### Memory
+
+The memory system injects relevant context from past runs into the system
+prompt before each run starts. It is **off by default** (`memory.enabled =
+false`) — existing behaviour is unchanged until you opt in.
+
+#### How it works
+
+At the start of every `run_agent` call, if a `MemoryProvider` is wired in,
+it calls `provider.recall(task, scope=<task_id or run_id>)`. The returned
+`MemoryRecord` list is appended to the system prompt under a
+`## Relevant memories` section:
+
+```
+## Relevant memories
+- [agent] Python 3.12 is the primary language of this project.
+- [user] User prefers concise answers.
+- [tool — unverified] Latest release is v2.4.1 (from changelog).
+```
+
+Each record carries a **provenance label** that signals its trust level:
+
+| Label | `Provenance` value | Meaning |
+|-------|--------------------|---------|
+| `[agent]` | `AGENT_REASONING` | Derived by the model; high trust |
+| `[user]` | `USER_STATED` | Self-reported by the user; medium trust |
+| `[tool — unverified]` | `TOOL_OUTPUT` | Retrieved from an external tool; low trust |
+
+Records are retrieved from two collections in a
+[markdown-rag](https://github.com/anthropics/markdown-rag) MCP server,
+merged by score, and trimmed to `memory.token_budget`:
+
+- **episodic** — per-run summaries scoped to the `task.task_id` (persistent
+  across CLI sessions; set `--task-id` to group related conversations).
+- **semantic** — durable facts that apply globally (no task_id filter).
+
+Backend failures degrade silently: if `recall` raises, the run continues
+with an empty memories section. The core loop never sees a concrete
+`MemoryProvider` — only the Protocol.
+
+#### Enabling it
+
+Add to `agent.toml`:
+
+```toml
+[memory]
+enabled = true
+
+[memory.server]
+name = "markdown-rag"
+transport = "streamable_http"
+url = "http://localhost:8100"      # wherever your markdown-rag server is
+search_tool = "search"             # the tool name exposed by the server
+```
+
+Then start your markdown-rag server and run normally:
+
+```bash
+python -m agent --task-id my-project "What should I work on today?"
+```
+
+`task_id` is the persistent scope — use the same value across sessions to
+accumulate episodic memories for a project.
+
+#### Adding a new `MemoryProvider`
+
+Implement the `MemoryProvider` Protocol from `agent/core/interfaces.py`:
+
+```python
+class MyMemoryProvider:
+    async def recall(self, task: Task, *, scope: str) -> list[MemoryRecord]:
+        ...  # query your store; never raise — return [] on failure
+```
+
+Then wire it in `agent/composition.py::build_memory_provider` and pass it
+to `run_agent`. **No changes to `agent/core`.**
+
+#### Eval fixture: `seed_memories`
+
+For evals, `EvalCase.seed_memories` seeds a `FixedMemoryProvider` so the
+eval runs without a live memory server:
+
+```jsonc
+{
+  "name": "recall_semantic_fact",
+  "input": "What is the primary language of this project?",
+  "cassette": "memory_recall.json",
+  "seed_memories": [
+    {
+      "id": "sem-001",
+      "kind": "semantic",
+      "content": "The agent runtime is implemented in Python 3.12.",
+      "provenance": "agent_reasoning",
+      "source": "codebase",
+      "task_id": null,
+      "score": 0.95
+    }
+  ],
+  "response_includes": "Python"
+}
+```
+
+The `memory_recall` task (`evals/tasks/cases.py`) exercises this path.
 
 ### Multi-agent / Sub-agents
 
@@ -671,6 +788,10 @@ production.**
      `user_message`, `cassette`, and the same per-turn opt-in assertions).
      The bridge accumulates the full message history across turns so each run
      sees the complete prior conversation context.
+   - **Memory fixture**: `seed_memories` (list of `MemoryRecord` dicts) seeds
+     a `FixedMemoryProvider` so the eval runs without a live memory server.
+     The bridge injects these records into the system prompt before the first
+     model call, exercising the same code path as production recall.
 
    Anything not overridden comes from the real `agent.toml` (skills, MCP
    servers, default permissions) — evals exercise production wiring.

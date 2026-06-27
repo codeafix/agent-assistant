@@ -109,3 +109,64 @@ def test_shipped_timestamping_skill_is_discoverable() -> None:
     assert skill is not None
     assert "clock" in skill.load_body()
     assert "UTC" in skill.description
+
+
+def test_compose_system_prompt_appends_memories_section() -> None:
+    from agent.core.events import Provenance
+    from agent.core.memory import MemoryKind, MemoryRecord
+
+    records = [
+        MemoryRecord(
+            id="1",
+            kind=MemoryKind.SEMANTIC,
+            content="Python 3.12 is the project language.",
+            provenance=Provenance.AGENT_REASONING,
+            score=0.9,
+        )
+    ]
+
+    prompt = compose_system_prompt("Base.", EmptySkillRegistry(), memories=records)
+
+    assert "## Relevant memories" in prompt
+    assert "[agent]" in prompt
+    assert "Python 3.12" in prompt
+
+
+def test_compose_system_prompt_with_no_memories_unchanged() -> None:
+    assert compose_system_prompt("Base.", EmptySkillRegistry(), memories=None) == "Base."
+    assert compose_system_prompt("Base.", EmptySkillRegistry(), memories=[]) == "Base."
+
+
+def test_compose_system_prompt_provenance_labels() -> None:
+    from agent.core.events import Provenance
+    from agent.core.memory import MemoryKind, MemoryRecord
+
+    records = [
+        MemoryRecord(
+            id="1",
+            kind=MemoryKind.SEMANTIC,
+            content="A",
+            provenance=Provenance.AGENT_REASONING,
+            score=1.0,
+        ),
+        MemoryRecord(
+            id="2",
+            kind=MemoryKind.EPISODIC,
+            content="B",
+            provenance=Provenance.USER_STATED,
+            score=0.9,
+        ),
+        MemoryRecord(
+            id="3",
+            kind=MemoryKind.SEMANTIC,
+            content="C",
+            provenance=Provenance.TOOL_OUTPUT,
+            score=0.8,
+        ),
+    ]
+
+    prompt = compose_system_prompt("Base.", EmptySkillRegistry(), memories=records)
+
+    assert "[agent]" in prompt
+    assert "[user]" in prompt
+    assert "[tool — unverified]" in prompt

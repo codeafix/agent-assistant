@@ -32,10 +32,12 @@ from agent.composition import (
 )
 from agent.config import AgentSettings
 from agent.core.entrypoint import run_agent
-from agent.core.interfaces import Model, PermissionPolicy, ToolRegistry
+from agent.core.interfaces import MemoryProvider, Model, PermissionPolicy, ToolRegistry
+from agent.core.memory import MemoryRecord
 from agent.core.messages import Message, TextBlock
 from agent.core.state import Task
 from agent.mcp.registry import MCPToolRegistry
+from agent.memory.provider import EmptyMemoryProvider, FixedMemoryProvider
 from agent.models.replay import ReplayModel
 from agent.observability.sink import InMemorySink
 from evals.mock_tools import MockToolRegistry
@@ -73,6 +75,11 @@ def run_eval_case(model: str = "replay") -> Solver:
             if case.permissions is not None
             else default_permissions
         )
+        memory_provider: MemoryProvider = (
+            FixedMemoryProvider([MemoryRecord.model_validate(m) for m in case.seed_memories])
+            if case.seed_memories
+            else EmptyMemoryProvider()
+        )
 
         tools_impl: MockToolRegistry | MCPToolRegistry = (
             MockToolRegistry(case.mock_tools)
@@ -105,6 +112,7 @@ def run_eval_case(model: str = "replay") -> Solver:
                         skills=skills,
                         permissions=permissions,
                         sink=InMemorySink(),
+                        memory_provider=memory_provider,
                     )
                     turn_transcripts.append(
                         [e.model_dump(mode="json") for e in turn_result.transcript]
@@ -148,6 +156,7 @@ def run_eval_case(model: str = "replay") -> Solver:
                     skills=skills,
                     permissions=permissions,
                     sink=InMemorySink(),
+                    memory_provider=memory_provider,
                 )
                 final_text = result.final_text()
                 state.output = ModelOutput.from_content(model=active_model.name, content=final_text)

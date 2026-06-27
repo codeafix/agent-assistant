@@ -1,0 +1,1 @@
+{"name": "recall_semantic_fact", "input": "What is the primary programming language of this project?", "cassette": "memory_recall.json", "seed_memories": [{"id": "sem-001", "kind": "semantic", "content": "The agent runtime is implemented in Python 3.12.", "provenance": "agent_reasoning", "source": "codebase", "task_id": null, "score": 0.95}], "response_includes": "Python"}

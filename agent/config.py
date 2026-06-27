@@ -85,6 +85,28 @@ class OtelConfig(BaseModel):
     service_name: str = "agent-runtime"
 
 
+class MemoryServerConfig(BaseModel):
+    """Config for the markdown-rag MCP server that backs memory recall."""
+
+    name: str = "markdown-rag"
+    transport: Literal["stdio", "streamable_http"] = "streamable_http"
+    url: str | None = None
+    command: str | None = None
+    args: list[str] = Field(default_factory=list[str])
+    search_tool: str = "search"
+
+
+class MemorySettings(BaseModel):
+    """Memory recall configuration. Disabled by default (no-op EmptyMemoryProvider)."""
+
+    enabled: bool = False
+    episodic_collection: str = "episodic"
+    semantic_collection: str = "semantic"
+    top_k: int = 10
+    token_budget: int = 2000
+    server: MemoryServerConfig = Field(default_factory=MemoryServerConfig)
+
+
 class AgentSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",
@@ -108,6 +130,8 @@ class AgentSettings(BaseSettings):
     # Multi-agent registry
     agents_dir: Path | None = None
     max_subagent_depth: int = 3
+    # Memory recall (read path)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
 
     @field_validator("skills_dir", "agents_dir")
     @classmethod

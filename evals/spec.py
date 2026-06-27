@@ -86,6 +86,10 @@ class EvalCase(BaseModel):
     initial_budget: int | None = None
     guard_signal: str | None = None
 
+    # Memory recall fixture: records seeded into a FixedMemoryProvider for
+    # this case. Each dict is validated as a MemoryRecord on the bridge side.
+    seed_memories: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+
     # Single-turn ground truth (checked when `turns` is empty).
     expected_tool_calls: list[ExpectedToolCall] = Field(default_factory=list[ExpectedToolCall])
     expected_skills: list[str] = Field(default_factory=list[str])

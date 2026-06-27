@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import os
 
-from agent.config import AgentSettings, ModelConfig
-from agent.core.interfaces import Model, PermissionPolicy, SkillRegistry
+from agent.config import AgentSettings, MCPServerConfig, ModelConfig
+from agent.core.interfaces import MemoryProvider, Model, PermissionPolicy, SkillRegistry
 from agent.mcp.permissions import AllowlistPolicy, AllowRule
+from agent.memory.provider import EmptyMemoryProvider, RagMemoryProvider
+from agent.memory.store import McpMemoryStore
 from agent.models.anthropic import AnthropicModel
 from agent.models.openai_compat import OpenAICompatModel
 from agent.models.prompted_tools import PromptedToolsModel
@@ -63,3 +65,44 @@ def build_skills(settings: AgentSettings) -> SkillRegistry:
     if settings.skills_dir is None:
         return EmptySkillRegistry()
     return FileSystemSkillRegistry(settings.skills_dir)
+
+
+def build_memory_provider(settings: AgentSettings) -> MemoryProvider:
+    """Returns EmptyMemoryProvider when memory is disabled (the default).
+
+    When memory.enabled is True, call build_memory_store() instead: it returns
+    an async context manager wrapping McpMemoryStore + RagMemoryProvider so the
+    MCP connection lifecycle is managed correctly.
+    """
+    if not settings.memory.enabled:
+        return EmptyMemoryProvider()
+    raise RuntimeError(
+        "memory.enabled=true requires an async context manager for McpMemoryStore. "
+        "Use build_memory_store() and enter it with `async with` in your entrypoint."
+    )
+
+
+def build_memory_store(settings: AgentSettings) -> McpMemoryStore:
+    """Build a McpMemoryStore from settings. The caller must use it as an async
+    context manager and pass the connected store to RagMemoryProvider."""
+    ms = settings.memory.server
+    server_config = MCPServerConfig(
+        name=ms.name,
+        transport=ms.transport,
+        url=ms.url,
+        command=ms.command,
+        args=ms.args,
+    )
+    return McpMemoryStore(server_config, search_tool=ms.search_tool)
+
+
+def build_rag_provider(settings: AgentSettings, store: McpMemoryStore) -> RagMemoryProvider:
+    """Pair a connected store with the settings-driven collection names and budget."""
+    mem = settings.memory
+    return RagMemoryProvider(
+        store,
+        episodic_collection=mem.episodic_collection,
+        semantic_collection=mem.semantic_collection,
+        top_k=mem.top_k,
+        token_budget=mem.token_budget,
+    )

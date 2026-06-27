@@ -1,0 +1,21 @@
+{
+  "turns": [
+    [
+      {
+        "type": "text_delta",
+        "text": "Based on my knowledge, the primary programming language used in this project is Python 3.12."
+      },
+      {
+        "type": "usage",
+        "usage": {
+          "input_tokens": 60,
+          "output_tokens": 18
+        }
+      },
+      {
+        "type": "done",
+        "stop_reason": "end_turn"
+      }
+    ]
+  ]
+}

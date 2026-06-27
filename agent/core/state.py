@@ -15,6 +15,7 @@ class Task(BaseModel):
     id: str
     system_prompt: str | None = None
     messages: list[Message]
+    task_id: str | None = None
 
 
 class RunResult(BaseModel):

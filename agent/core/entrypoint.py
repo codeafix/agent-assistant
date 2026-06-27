@@ -9,6 +9,7 @@ import uuid
 from agent.core.events import RunFinished, RunStarted
 from agent.core.interfaces import (
     HumanApproval,
+    MemoryProvider,
     Model,
     PermissionPolicy,
     SkillRegistry,
@@ -16,6 +17,7 @@ from agent.core.interfaces import (
     TranscriptSink,
 )
 from agent.core.loop import compose_system_prompt, run_steps
+from agent.core.memory import MemoryRecord
 from agent.core.state import RunResult, Task
 from agent.observability.sink import FanOutSink, InMemorySink
 
@@ -32,6 +34,7 @@ async def run_agent(
     sink: TranscriptSink,
     approval: HumanApproval | None = None,
     max_steps: int = 20,
+    memory_provider: MemoryProvider | None = None,
 ) -> RunResult:
     run_id = str(uuid.uuid4())
 
@@ -40,7 +43,15 @@ async def run_agent(
     recorder = InMemorySink()
     fanout = FanOutSink([recorder, sink])
 
-    system = compose_system_prompt(task.system_prompt or _FALLBACK_SYSTEM_PROMPT, skills)
+    scope = task.task_id or run_id
+    memories: list[MemoryRecord] = []
+    if memory_provider is not None:
+        try:
+            memories = await memory_provider.recall(task, scope=scope)
+        except Exception:  # noqa: BLE001 — backend failure: proceed without memories
+            pass
+
+    system = compose_system_prompt(task.system_prompt or _FALLBACK_SYSTEM_PROMPT, skills, memories)
     messages = list(task.messages)
 
     await fanout.emit(RunStarted(run_id=run_id, task_name=task.id))

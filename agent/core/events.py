@@ -20,6 +20,19 @@ from agent.core.messages import ToolResultBlock
 from agent.models.base import Usage
 
 
+class Provenance(StrEnum):
+    """Trust axis of a memory record.
+
+    Rendered as labels in the system-prompt memory section and used as a
+    read gate: AGENT_REASONING is trusted internal inference, USER_STATED is
+    self-reported (lower trust), TOOL_OUTPUT is unverified external data.
+    """
+
+    AGENT_REASONING = "agent_reasoning"
+    USER_STATED = "user_stated"
+    TOOL_OUTPUT = "tool_output"
+
+
 class Decision(StrEnum):
     ALLOW = "allow"
     DENY = "deny"

@@ -1,0 +1,9 @@
+{
+  "turns": [
+    [
+      {"type": "text_delta", "text": "[{\"op\": \"create\", \"content\": \"Python is the primary programming language used in this project.\", \"source_episode_ids\": [\"ep-001\"], \"claimed_provenance\": \"agent_reasoning\", \"rationale\": \"Stated clearly by the user as a project language constraint.\", \"confidence\": 0.95}, {\"op\": \"skip\", \"rationale\": \"Task-local state: in-progress work items not suitable for long-term memory.\"}]"},
+      {"type": "usage", "usage": {"input_tokens": 120, "output_tokens": 95}},
+      {"type": "done", "stop_reason": "end_turn"}
+    ]
+  ]
+}

@@ -104,6 +104,13 @@ chat:
 	uv run python scripts/local_model.py $(MODEL) -- \
 		uv run python -m agent --chat $(MODEL_FLAG)
 
+# Consolidate episodic memories for TASK_ID into semantic facts (MODEL=anthropic for a real run).
+TASK_ID ?= cli-task
+.PHONY: consolidate
+consolidate:
+	uv run python scripts/local_model.py $(MODEL) -- \
+		uv run python scripts/consolidate.py --task-id $(TASK_ID) $(MODEL_FLAG)
+
 # Interactive chat through a named agent (loads agents_dir, wires sub-agents as tools).
 # AGENT=orchestrator MODEL=anthropic (or any [models] key).
 AGENT ?= orchestrator

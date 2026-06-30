@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+import pytest
+
+import agent.models.prompted_tools as prompted_tools_mod
 from agent.core.messages import Message, TextBlock, ToolSpec
 from agent.models.base import (
     StreamDone,
@@ -143,3 +146,32 @@ async def test_system_prompt_is_combined_with_tool_preamble() -> None:
     assert inner.last_system is not None
     assert inner.last_system.startswith("You are helpful.")
     assert "echo" in inner.last_system
+
+
+# --- PR 1b: stream size cap ---
+
+
+async def test_stream_cap_aborts_oversized_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(prompted_tools_mod, "_MAX_STREAM_CHARS", 5)
+    inner = FakeModel([TextDelta(text="123456"), StreamDone(stop_reason="end_turn")])
+    model = PromptedToolsModel(inner)
+    with pytest.raises(RuntimeError, match="exceeded"):
+        async for _ in model.generate(
+            [Message(role="user", content=[TextBlock(text="hi")])],
+            [ECHO_TOOL],
+        ):
+            pass
+
+
+async def test_stream_cap_passes_within_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(prompted_tools_mod, "_MAX_STREAM_CHARS", 5)
+    inner = FakeModel([TextDelta(text="hi"), StreamDone(stop_reason="end_turn")])
+    model = PromptedToolsModel(inner)
+    events = [
+        e
+        async for e in model.generate(
+            [Message(role="user", content=[TextBlock(text="hi")])],
+            [ECHO_TOOL],
+        )
+    ]
+    assert any(isinstance(e, StreamDone) for e in events)

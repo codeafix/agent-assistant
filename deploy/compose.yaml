@@ -31,7 +31,14 @@ services:
       AGENT_OTEL__ENABLED: "true"
       AGENT_OTEL__ENDPOINT: http://langfuse-web:3000/api/public/otel
       AGENT_OTEL__SERVICE_NAME: agent-runtime
+      # Plaintext HTTP is acceptable here because langfuse-web is on the
+      # internal Docker bridge (no internet route). Requires allow_insecure=true
+      # because the endpoint is non-loopback and carries auth headers.
+      # TODO (2c): move this credential to a Docker secret / file mount so it
+      # does not appear in /proc/self/environ or `docker inspect` output.
+      AGENT_OTEL__ALLOW_INSECURE: "true"
       # base64("pk-lf-00000000-0000-0000-0000-000000000000:sk-lf-00000000-0000-0000-0000-000000000000")
+      # CHANGEME: rotate before use outside a local sandbox; see TODO (2c) above.
       AGENT_OTEL__HEADERS__AUTHORIZATION: >-
         Basic cGstbGYtMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAwOnNrLWxmLTAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMA==
     command: ["Please echo 'hello'."]

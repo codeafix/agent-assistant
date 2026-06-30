@@ -4,18 +4,20 @@ correctly-nested OTel span tree, and back-fills trace/span ids onto events."""
 import sys
 from pathlib import Path
 
+import pytest
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from agent.config import MCPServerConfig
+from agent.config import MCPServerConfig, OtelConfig
 from agent.core.entrypoint import run_agent
-from agent.core.events import RunFinished
+from agent.core.events import Error, RunFinished
 from agent.core.messages import Message, TextBlock
 from agent.core.state import Task
 from agent.mcp.permissions import AllowlistPolicy, AllowRule
 from agent.mcp.registry import MCPToolRegistry
 from agent.models.replay import ReplayModel
+from agent.observability.otel import _validate_endpoint  # pyright: ignore[reportPrivateUsage]
 from agent.observability.sink import OtelSink
 from agent.skills.registry import EmptySkillRegistry
 
@@ -94,3 +96,89 @@ async def test_otel_sink_produces_nested_span_tree() -> None:
     assert len(run_finished) == 1
     assert run_finished[0].trace_id == format(run_span.context.trace_id, "032x")
     assert run_finished[0].span_id == format(run_span.context.span_id, "016x")
+
+
+# --- PR 2b: OTLP endpoint validation ---
+
+
+def test_validate_endpoint_raises_for_http_non_loopback_with_auth() -> None:
+    with pytest.raises(ValueError, match="allow_insecure"):
+        _validate_endpoint(
+            "http://langfuse-web:3000/api/public/otel",
+            has_auth=True,
+            allow_insecure=False,
+        )
+
+
+def test_validate_endpoint_passes_when_allow_insecure_true() -> None:
+    _validate_endpoint(
+        "http://langfuse-web:3000/api/public/otel",
+        has_auth=True,
+        allow_insecure=True,
+    )
+
+
+def test_validate_endpoint_passes_for_loopback_http_with_auth() -> None:
+    _validate_endpoint("http://localhost:4317/", has_auth=True, allow_insecure=False)
+
+
+def test_validate_endpoint_passes_for_https_with_auth() -> None:
+    _validate_endpoint("https://otel.example.com/v1/traces", has_auth=True, allow_insecure=False)
+
+
+def test_validate_endpoint_passes_without_auth_over_http() -> None:
+    _validate_endpoint(
+        "http://langfuse-web:3000/api/public/otel", has_auth=False, allow_insecure=False
+    )
+
+
+def test_otel_config_disabled_by_default() -> None:
+    cfg = OtelConfig()
+    assert cfg.enabled is False
+
+
+# --- PR 2d: error message truncation ---
+
+
+async def test_record_error_truncates_long_message() -> None:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+    sink = OtelSink(tracer)
+
+    long_message = "x" * 500
+    error = Error(run_id="r1", step_index=None, where="test", message=long_message)
+
+    run_span = tracer.start_span("run", attributes={})
+    sink._run_spans["r1"] = run_span  # pyright: ignore[reportPrivateUsage]
+
+    await sink.emit(error)
+    run_span.end()
+
+    finished = exporter.get_finished_spans()
+    assert len(finished) == 1
+    error_events = [e for e in finished[0].events if e.name == "error"]
+    assert len(error_events) == 1
+    assert len(error_events[0].attributes["message"]) == 200  # type: ignore[arg-type]
+
+
+async def test_record_error_keeps_short_message_intact() -> None:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+    sink = OtelSink(tracer)
+
+    short_message = "something went wrong"
+    error = Error(run_id="r2", step_index=None, where="test", message=short_message)
+
+    run_span = tracer.start_span("run", attributes={})
+    sink._run_spans["r2"] = run_span  # pyright: ignore[reportPrivateUsage]
+
+    await sink.emit(error)
+    run_span.end()
+
+    finished = exporter.get_finished_spans()
+    error_events = [e for e in finished[0].events if e.name == "error"]
+    assert error_events[0].attributes["message"] == short_message  # type: ignore[index]

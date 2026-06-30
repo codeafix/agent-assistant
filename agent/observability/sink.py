@@ -261,7 +261,12 @@ class OtelSink:
         if span is None:
             return
         _tag(event, span)
-        span.add_event("error", attributes={"where": event.where, "message": event.message})
+        # Truncate to prevent accidental interpolated content reaching telemetry.
+        # Error.message is currently only set to static strings, but cap it
+        # defensively so future callers cannot exfiltrate user content.
+        _MAX_MSG = 200
+        message = event.message[:_MAX_MSG]
+        span.add_event("error", attributes={"where": event.where, "message": message})
 
 
 def _set_usage_attributes(span: Span, usage: Usage) -> None:

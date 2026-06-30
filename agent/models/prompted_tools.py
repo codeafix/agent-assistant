@@ -25,6 +25,8 @@ from agent.models.base import StreamDone, StreamEvent, StreamUsage, TextDelta, T
 
 _TOOL_CALL_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
 
+_MAX_STREAM_CHARS = 2_000_000
+
 _TOOLS_PREAMBLE = """
 You can call tools by writing a line in this exact format (one call per line):
 <tool_call>{{"name": "<tool name>", "arguments": <json object>}}</tool_call>
@@ -77,6 +79,10 @@ class PromptedToolsModel:
             messages, system=augmented_system, max_tokens=max_tokens, temperature=temperature
         ):
             if isinstance(event, TextDelta):
+                if len(text) + len(event.text) > _MAX_STREAM_CHARS:
+                    raise RuntimeError(
+                        f"model stream exceeded {_MAX_STREAM_CHARS:,} chars; aborting"
+                    )
                 text += event.text
             elif isinstance(event, StreamUsage):
                 yield event

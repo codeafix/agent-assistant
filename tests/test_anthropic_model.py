@@ -192,3 +192,60 @@ async def test_generate_applies_pricing() -> None:
     assert isinstance(usage_event, StreamUsage)
     # 3 input tokens * $2 + 4 output tokens * $10
     assert usage_event.usage.cost_usd == 46.0
+
+
+# --- PR 1c: malformed tool-call JSON ---
+
+
+async def test_generate_tolerates_malformed_tool_args() -> None:
+    model = AnthropicModel("claude-sonnet-4-6", api_key="test")
+
+    raw_events = [
+        SimpleNamespace(
+            type="message_start",
+            message=SimpleNamespace(
+                usage=SimpleNamespace(
+                    input_tokens=5, cache_read_input_tokens=0, cache_creation_input_tokens=0
+                )
+            ),
+        ),
+        SimpleNamespace(
+            type="content_block_start",
+            index=0,
+            content_block=SimpleNamespace(type="tool_use", id="call_bad", name="echo"),
+        ),
+        SimpleNamespace(
+            type="content_block_delta",
+            index=0,
+            delta=SimpleNamespace(type="input_json_delta", partial_json="{NOT JSON}"),
+        ),
+        SimpleNamespace(type="content_block_stop", index=0),
+        SimpleNamespace(
+            type="message_delta",
+            delta=SimpleNamespace(stop_reason="tool_use"),
+            usage=SimpleNamespace(
+                output_tokens=3, cache_read_input_tokens=None, cache_creation_input_tokens=None
+            ),
+        ),
+    ]
+
+    async def fake_create(**_kwargs: object) -> AsyncIterator[SimpleNamespace]:
+        async def _stream() -> AsyncIterator[SimpleNamespace]:
+            for event in raw_events:
+                yield event
+
+        return _stream()
+
+    cast(Any, model)._client.messages.create = fake_create
+
+    events = [
+        e
+        async for e in model.generate(
+            [Message(role="user", content=[TextBlock(text="hi")])],
+            [ToolSpec(name="echo", description="Echo text", input_schema={"type": "object"})],
+        )
+    ]
+
+    tool_event = next(e for e in events if isinstance(e, ToolCallComplete))
+    assert tool_event.block.name == "echo"
+    assert tool_event.block.input == {}

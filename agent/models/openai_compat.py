@@ -26,6 +26,10 @@ from agent.models.base import (
     Usage,
 )
 
+# Hard cap on accumulated stream content. Protects against runaway local
+# models that emit unbounded output and would grow memory without limit.
+_MAX_STREAM_CHARS = 2_000_000
+
 _FINISH_REASON_MAP = {
     "stop": "end_turn",
     "length": "max_tokens",
@@ -69,6 +73,7 @@ class OpenAICompatModel:
         usage_out: Usage | None = None
         tool_calls: dict[int, tuple[str, str, list[str]]] = {}
         output_text_parts: list[str] = []
+        total_chars = 0
 
         stream = await self._client.chat.completions.create(
             model=self.name,
@@ -98,6 +103,11 @@ class OpenAICompatModel:
             choice = chunk.choices[0]
             delta = choice.delta
             if delta.content:
+                total_chars += len(delta.content)
+                if total_chars > _MAX_STREAM_CHARS:
+                    raise RuntimeError(
+                        f"model stream exceeded {_MAX_STREAM_CHARS:,} chars; aborting"
+                    )
                 output_text_parts.append(delta.content)
                 yield TextDelta(text=delta.content)
             for tool_call_delta in delta.tool_calls or []:
@@ -108,6 +118,11 @@ class OpenAICompatModel:
                     if tool_call_delta.function.name:
                         tool_name = tool_call_delta.function.name
                     if tool_call_delta.function.arguments:
+                        total_chars += len(tool_call_delta.function.arguments)
+                        if total_chars > _MAX_STREAM_CHARS:
+                            raise RuntimeError(
+                                f"model stream exceeded {_MAX_STREAM_CHARS:,} chars; aborting"
+                            )
                         args_parts.append(tool_call_delta.function.arguments)
                 tool_calls[tool_call_delta.index] = (tool_id, tool_name, args_parts)
             if choice.finish_reason:
@@ -115,7 +130,10 @@ class OpenAICompatModel:
 
         for tool_id, tool_name, args_parts in tool_calls.values():
             raw_json = "".join(args_parts)
-            tool_input: dict[str, object] = json.loads(raw_json) if raw_json else {}
+            try:
+                tool_input: dict[str, object] = json.loads(raw_json) if raw_json else {}
+            except json.JSONDecodeError:
+                tool_input = {}
             output_text_parts.append(raw_json)
             yield ToolCallComplete(block=ToolUseBlock(id=tool_id, name=tool_name, input=tool_input))
 

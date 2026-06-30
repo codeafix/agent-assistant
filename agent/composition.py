@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from agent.config import AgentSettings, MCPServerConfig, ModelConfig
 from agent.core.interfaces import MemoryProvider, Model, PermissionPolicy, SkillRegistry
@@ -22,6 +23,15 @@ from agent.models.openai_compat import OpenAICompatModel
 from agent.models.prompted_tools import PromptedToolsModel
 from agent.models.replay import ReplayModel
 from agent.skills.registry import EmptySkillRegistry, FileSystemSkillRegistry
+
+
+def _check_base_url_trusted(base_url: str, trusted: list[str]) -> None:
+    host = urlparse(base_url).hostname or ""
+    if host not in trusted:
+        raise ValueError(
+            f"openai_compat model: base_url host '{host}' is not in trusted_base_urls "
+            f"{trusted!r} — credentials would be sent to an untrusted host"
+        )
 
 
 def build_model(config: ModelConfig) -> Model:
@@ -47,6 +57,12 @@ def _build_base_model(config: ModelConfig) -> Model:
             price_per_output_token_usd=config.price_per_output_token_usd,
         )
     if config.provider == "openai_compat":
+        if (
+            api_key is not None
+            and config.base_url is not None
+            and config.trusted_base_urls is not None
+        ):
+            _check_base_url_trusted(config.base_url, config.trusted_base_urls)
         return OpenAICompatModel(
             config.name,
             base_url=config.base_url,

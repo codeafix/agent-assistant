@@ -11,6 +11,10 @@ from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
+import agent.models.openai_compat as openai_compat_mod
+from agent.composition import _check_base_url_trusted  # pyright: ignore[reportPrivateUsage]
 from agent.core.messages import Message, TextBlock, ToolResultBlock, ToolSpec, ToolUseBlock
 from agent.models.base import StreamDone, StreamUsage, TextDelta, ToolCallComplete
 from agent.models.openai_compat import (
@@ -203,3 +207,110 @@ async def test_generate_estimates_usage_when_backend_reports_none() -> None:
     assert usage_event.usage.output_tokens > 0
 
     assert events[2] == StreamDone(stop_reason="end_turn")
+
+
+# --- PR 1a: base_url allowlist ---
+
+
+def test_trusted_base_url_check_passes_when_host_in_list() -> None:
+    _check_base_url_trusted("http://localhost:8080/v1", ["localhost"])
+
+
+def test_trusted_base_url_check_raises_when_host_not_in_list() -> None:
+    with pytest.raises(ValueError, match="untrusted host"):
+        _check_base_url_trusted("http://evil.example.com/v1", ["localhost"])
+
+
+def test_trusted_base_url_check_uses_hostname_not_full_url() -> None:
+    _check_base_url_trusted("http://trusted-llm:8080/v1", ["trusted-llm"])
+
+
+# --- PR 1b: stream size cap ---
+
+
+async def _make_model_with_text_stream(text: str) -> list[object]:
+    model = OpenAICompatModel("local-model")
+
+    chunks = [
+        SimpleNamespace(
+            usage=None,
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content=text, tool_calls=None),
+                    finish_reason="stop",
+                )
+            ],
+        ),
+    ]
+
+    async def fake_create(**_kwargs: object) -> AsyncIterator[SimpleNamespace]:
+        async def _stream() -> AsyncIterator[SimpleNamespace]:
+            for chunk in chunks:
+                yield chunk
+
+        return _stream()
+
+    cast(Any, model)._client.chat.completions.create = fake_create
+    return [e async for e in model.generate([Message(role="user", content=[TextBlock(text="hi")])])]
+
+
+async def test_generate_aborts_when_text_stream_exceeds_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(openai_compat_mod, "_MAX_STREAM_CHARS", 5)
+    with pytest.raises(RuntimeError, match="exceeded"):
+        await _make_model_with_text_stream("123456")
+
+
+async def test_generate_succeeds_when_text_stream_within_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(openai_compat_mod, "_MAX_STREAM_CHARS", 5)
+    events = await _make_model_with_text_stream("hi")
+    assert events[0] == TextDelta(text="hi")
+
+
+# --- PR 1c: malformed tool-call JSON ---
+
+
+async def test_generate_tolerates_malformed_tool_args() -> None:
+    model = OpenAICompatModel("local-model")
+
+    chunks = [
+        SimpleNamespace(
+            usage=None,
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content=None,
+                        tool_calls=[
+                            SimpleNamespace(
+                                index=0,
+                                id="call_bad",
+                                function=SimpleNamespace(name="echo", arguments="{NOT JSON}"),
+                            )
+                        ],
+                    ),
+                    finish_reason="tool_calls",
+                )
+            ],
+        ),
+        SimpleNamespace(usage=None, choices=[]),
+    ]
+
+    async def fake_create(**_kwargs: object) -> AsyncIterator[SimpleNamespace]:
+        async def _stream() -> AsyncIterator[SimpleNamespace]:
+            for chunk in chunks:
+                yield chunk
+
+        return _stream()
+
+    cast(Any, model)._client.chat.completions.create = fake_create
+
+    events = [
+        e async for e in model.generate([Message(role="user", content=[TextBlock(text="hi")])])
+    ]
+
+    tool_event = next(e for e in events if isinstance(e, ToolCallComplete))
+    assert tool_event.block.name == "echo"
+    assert tool_event.block.input == {}

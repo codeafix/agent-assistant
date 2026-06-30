@@ -105,7 +105,10 @@ class AnthropicModel:
                 if event.index in tool_use_blocks:
                     tool_id, tool_name = tool_use_blocks.pop(event.index)
                     raw_json = "".join(tool_input_parts.pop(event.index))
-                    tool_input: dict[str, object] = json.loads(raw_json) if raw_json else {}
+                    try:
+                        tool_input: dict[str, object] = json.loads(raw_json) if raw_json else {}
+                    except json.JSONDecodeError:
+                        tool_input = {}
                     yield ToolCallComplete(
                         block=ToolUseBlock(id=tool_id, name=tool_name, input=tool_input)
                     )

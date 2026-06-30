@@ -55,6 +55,12 @@ class ModelConfig(BaseModel):
     api_key_env: str | None = None
     """Env var holding the API key, if any."""
 
+    trusted_base_urls: list[str] | None = None
+    """Allowlist of hostname strings the api_key may be sent to.
+    Checked only when both api_key_env and base_url are set. When omitted,
+    no host restriction is applied (backward-compatible default for configs
+    that don't carry credentials alongside a custom base_url)."""
+
     native_tool_calling: bool = True
     """If False, wrap the adapter with `models/prompted_tools.py`."""
 
@@ -79,10 +85,14 @@ class OtelConfig(BaseModel):
     """OTLP export config. Langfuse (or any OTLP collector) is configured
     purely as a destination -- no Langfuse-specific code in agent/core."""
 
-    enabled: bool = True
+    enabled: bool = False
     endpoint: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     service_name: str = "agent-runtime"
+    allow_insecure: bool = False
+    """Allow plaintext HTTP to non-loopback OTLP endpoints. Requires explicit
+    opt-in because auth headers would be sent in the clear. Only set this for
+    internal container networks where TLS is terminated at the network layer."""
 
 
 class MemoryServerConfig(BaseModel):
